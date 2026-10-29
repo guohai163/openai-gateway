@@ -14,7 +14,7 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - Chat Completions、Embeddings、Responses 和 SSE；Responses 资源归属及多轮上下文持久化绑定。
 - 按上游 Key 记录额度阻断、认证错误与限流，支持定时小额探测自动恢复。
 - AES-256-GCM 加密上游凭据；私有 Key 保存 SHA-256 哈希；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
-- 中英文自动识别、手动切换并记住选择；只记录调用元数据，不保存对话正文。
+- 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。只记录调用元数据，不保存对话正文。
 
 ## 使用 CI 镜像运行（推荐）
 
@@ -104,8 +104,10 @@ docker compose down
 1. 添加上游密钥，填写名称和普通 OpenAI API Key。系统仅使用该 Key 查询模型列表，不发送组织或项目头；成功后加入共享调度池。点击模型数量可以查看完整模型列表和原始响应。
 2. OpenAI 项目 ID 是可选的上游请求元数据，留空使用密钥默认范围。推理请求按需发送配置的项目头，不发送 `OpenAI-Organization`；它不绑定网关业务项目。
 3. 如需额度恢复探测，在该上游 Key 中填写可用且支持 Responses 的探测模型。留空不影响正常推理，但不会发起恢复探测。
-4. 颁发私有 Key，设置非空 IP 白名单、模型列表及可选有效期。明文只展示一次；客户端 `base_url` 使用 `https://你的域名/v1`。
+4. 颁发私有 Key，名称仅支持小写字母、数字和连字符（`-`），最多 120 个字符；IP 白名单默认按当前请求者 IPv4 `/24` 或 IPv6 `/64` 自动填写，可手动修改。从全部已同步上游 Key 的模型去重列表中搜索、多选，或选择全部模型。有效期仅支持 30、90、120 天，默认 30 天，从创建或续期时计算。新密钥统一以 `gk-ai-` 开头，明文只展示一次；客户端 `base_url` 使用 `https://你的域名/v1`。
 5. 如有需要，可独立创建网关项目，仅填写名称、说明和启停状态。项目不绑定上游或私有 Key，所有项目共享可用上游密钥池。
+
+私有密钥操作栏和新密钥弹窗均提供“如何使用”，可生成发送 `hi` 的 curl 示例，自动使用当前网关地址。刚创建的密钥会直接带入示例；之后可填写保存的完整密钥，或通过 `GATEWAY_API_KEY` 环境变量使用。密钥输入仅保留在当前弹层，不会保存或上传。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
 
 ```sh
 curl https://ai.example.com/v1/models \
@@ -139,9 +141,11 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 管理 API 位于 `/admin/api`，先 `POST /login` 获取会话 Cookie 和 `csrf`，非 GET 操作携带 `X-CSRF-Token`。后台使用这些相同接口：
 
 - `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
+- `GET /client_ip` 返回当前请求的 `client_ip` 和建议的 `default_cidr`（IPv4 `/24`、IPv6 `/64`）。新建私有 Key 时自动填入白名单，可手动修改；编辑已有 Key 保留原白名单。客户端 IP 沿用 `TRUSTED_PROXIES` 的可信代理解析，不信任任意转发头。
 - `GET, POST /projects|upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 不需要组织或网关项目。网关项目仅接受名称、说明和启停字段。
 - `POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /upstream_keys/{id}/probe`。
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
+- 私有 Key 使用 `models` 数组设置模型权限；`["*"]` 表示全部当前及未来可用模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
 - `GET /logs|audit`；列表支持 `limit`（1–500）、`offset`。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。

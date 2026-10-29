@@ -13,16 +13,28 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Monitor,
+  Moon,
   Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
+  SquareTerminal,
+  Sun,
   Terminal,
   X,
-  Zap,
 } from "lucide-react";
 import { messages, resolveLanguage } from "./i18n.mjs";
+import { ModelMultiSelect } from "./ModelMultiSelect";
+import { KeyUsageDialog } from "./KeyUsageDialog";
+import { IPAllowlistField } from "./IPAllowlistField";
+import { expiryDayOptions, fetchAllModels } from "./gateway-key-form.mjs";
+import {
+  readThemePreference,
+  resolveTheme,
+  themeStorageKey,
+} from "./theme.mjs";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -62,6 +74,25 @@ function App() {
   const language = resolveLanguage(preference, [...browser]) as "en" | "zh",
     locale = language === "zh" ? "zh-CN" : "en-US",
     t = (k: string) => (messages[language] as Record<string, string>)[k] || k;
+  const [themePreference, setThemePreference] = useState<
+    "system" | "light" | "dark"
+  >(readThemePreference);
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const update = () => {
+      const theme = resolveTheme(themePreference, media.matches);
+      document.documentElement.dataset.theme = theme;
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute("content", theme === "dark" ? "#212121" : "#ffffff");
+    };
+    update();
+    media.addEventListener("change", update);
+    try {
+      localStorage.setItem(themeStorageKey, themePreference);
+    } catch {}
+    return () => media.removeEventListener("change", update);
+  }, [themePreference]);
   const [session, setSession] = useState<string | null | undefined>(),
     [page, setPage] = useState<Page>("overview"),
     [data, setData] = useState<Row[]>([]),
@@ -74,6 +105,8 @@ function App() {
     [notice, setNotice] = useState(""),
     [modal, setModal] = useState<Row | null>(null),
     [catalog, setCatalog] = useState<Row | null>(null),
+    [usage, setUsage] = useState<Row | null>(null),
+    [newKeyInfo, setNewKeyInfo] = useState<Row | null>(null),
     [secret, setSecret] = useState(""),
     [copied, setCopied] = useState(false),
     [offset, setOffset] = useState(0),
@@ -105,13 +138,21 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      setModels((await api("models?limit=500")).data);
-      if (page === "overview") setDashboard(await api("dashboard"));
-      else if (page === "settings") setSettings(await api("settings"));
-      else {
-        const q = new URLSearchParams({ limit: "100", offset: String(offset) });
-        setData((await api(page + "?" + q)).data);
-      }
+      const q = new URLSearchParams({ limit: "100", offset: String(offset) });
+      const path =
+        page === "overview"
+          ? "dashboard"
+          : page === "settings"
+            ? "settings"
+            : page + "?" + q;
+      const [catalog, result] = await Promise.all([
+        fetchAllModels(api),
+        api(path),
+      ]);
+      setModels(catalog);
+      if (page === "overview") setDashboard(result);
+      else if (page === "settings") setSettings(result);
+      else setData(result.data);
     } catch (e) {
       fail(e);
     } finally {
@@ -166,20 +207,22 @@ function App() {
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!modal) return;
-    const input: Row = Object.fromEntries(new FormData(e.currentTarget));
+    const form = new FormData(e.currentTarget);
+    const input: Row = Object.fromEntries(form);
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
-      input.models = input.models
-        .split(",")
-        .map((s: string) => s.trim())
-        .filter(Boolean);
+      input.models = form.getAll("models");
+      if (!input.models.length) {
+        setError("models_required");
+        return;
+      }
       input.cidrs = input.cidrs
         .split(/[\n,]/)
         .map((s: string) => s.trim())
         .filter(Boolean);
-      input.expires_at = input.expires_at
-        ? new Date(input.expires_at).toISOString()
-        : "";
+      if (input.expires_in_days)
+        input.expires_in_days = Number(input.expires_in_days);
+      else delete input.expires_in_days;
     }
     setBusy(true);
     setError("");
@@ -191,6 +234,11 @@ function App() {
       setModal(null);
       if (v.key) {
         setSecret(v.key);
+        setNewKeyInfo({
+          id: v.id,
+          name: input.name,
+          models: input.models || ["*"],
+        });
         setCopied(false);
       }
       setNotice(v.warning || "updated");
@@ -233,6 +281,34 @@ function App() {
       </select>
     </label>
   );
+  const ThemeIcon =
+    themePreference === "system"
+      ? Monitor
+      : themePreference === "dark"
+        ? Moon
+        : Sun;
+  const appearance = (
+    <label className="appearance">
+      <ThemeIcon size={16} aria-hidden="true" />
+      <select
+        aria-label={t("appearance")}
+        value={themePreference}
+        onChange={(e) =>
+          setThemePreference(e.target.value as "system" | "light" | "dark")
+        }
+      >
+        <option value="system">{t("themeSystem")}</option>
+        <option value="light">{t("themeLight")}</option>
+        <option value="dark">{t("themeDark")}</option>
+      </select>
+    </label>
+  );
+  const displayControls = (
+    <div className="display-controls">
+      {appearance}
+      {languages}
+    </div>
+  );
   const alert = error && (
     <div className="alert" role="alert">
       {(messages[language] as Record<string, string>)[error] ||
@@ -245,7 +321,7 @@ function App() {
   const mark = (
     <span className="wordmark">
       <span className="logo">
-        <Zap size={23} fill="currentColor" />
+        <SquareTerminal size={21} />
       </span>
       <span>
         {t("brand")}
@@ -256,53 +332,20 @@ function App() {
   if (session === undefined)
     return (
       <div className="boot">
-        <Zap />
+        <SquareTerminal />
         {t("loading")}
       </div>
     );
   if (session === null)
     return (
       <div className="login-layout">
-        <aside className="login-art">
+        <header className="login-header">
           {mark}
-          <div>
-            <span className="eyebrow">AI INFRASTRUCTURE</span>
-            <h1>
-              {language === "zh" ? (
-                <>
-                  连接智能，
-                  <br />
-                  由你掌控。
-                </>
-              ) : (
-                <>
-                  Intelligence,
-                  <br />
-                  on your terms.
-                </>
-              )}
-            </h1>
-            <p>{t("subtitle")}</p>
-            <div className="network-art">
-              <div className="node">API</div>
-              <div className="connection" />
-              <div className="node hub">
-                <Zap size={30} />
-              </div>
-              <div className="connection" />
-              <div className="node">AI</div>
-            </div>
-          </div>
-          <span className="security-line">
-            <ShieldCheck size={16} />
-            {t("secure")}
-          </span>
-        </aside>
+          {displayControls}
+        </header>
         <main className="login-main">
-          <div className="login-language">{languages}</div>
           <form className="login-card" onSubmit={login}>
-            <span className="eyebrow">{t("console")}</span>
-            <h2>{t("loginTitle")}</h2>
+            <h1>{t("loginTitle")}</h1>
             <p>{t("loginSubtitle")}</p>
             {alert}
             <label>
@@ -325,8 +368,11 @@ function App() {
             </label>
             <button className="primary" disabled={busy}>
               {t(busy ? "loading" : "login")}
-              <ArrowUpRight size={17} />
             </button>
+            <span className="login-security">
+              <ShieldCheck size={14} />
+              {t("secure")}
+            </span>
           </form>
         </main>
       </div>
@@ -437,6 +483,19 @@ function App() {
         type={type}
         required={required}
         defaultValue={modal?.[n] || ""}
+        pattern={
+          page === "gateway_keys" && n === "name" ? "[a-z0-9\\-]+" : undefined
+        }
+        maxLength={page === "gateway_keys" && n === "name" ? 120 : undefined}
+        title={
+          page === "gateway_keys" && n === "name"
+            ? t("invalid_key_name")
+            : undefined
+        }
+        autoCapitalize={
+          page === "gateway_keys" && n === "name" ? "none" : undefined
+        }
+        spellCheck={page === "gateway_keys" && n === "name" ? false : undefined}
         autoComplete={type === "password" ? "new-password" : "off"}
       />
       {hint && <small>{t(hint)}</small>}
@@ -445,7 +504,11 @@ function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <button className="brand-button" onClick={() => navigate("overview")}>
+        <button
+          className="brand-button"
+          aria-label={t("brand")}
+          onClick={() => navigate("overview")}
+        >
           {mark}
         </button>
         <div className="sidebar-label">{t("workspace")}</div>
@@ -459,11 +522,13 @@ function App() {
               )}
               <button
                 className={page === p ? "selected" : ""}
+                aria-current={page === p ? "page" : undefined}
+                aria-label={t(p)}
+                title={t(p)}
                 onClick={() => navigate(p)}
               >
                 {icon}
                 <span>{t(p)}</span>
-                {page === p && <i className="nav-dot" />}
               </button>
             </React.Fragment>
           ))}
@@ -497,19 +562,16 @@ function App() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span>
+          <span className="breadcrumbs">
             {t("workspace")}
             <span className="slash">/</span>
             <strong>{t(page)}</strong>
           </span>
-          {languages}
+          {displayControls}
         </header>
         <main className="main">
           <div className="page-heading">
             <div>
-              <span className="eyebrow">
-                {page === "overview" ? "AI GATEWAY" : t("console")}
-              </span>
               <h1>{t(page)}</h1>
               <p>
                 {t(
@@ -560,31 +622,27 @@ function App() {
             <>
               <div className="stats-grid">
                 {[
-                  ["available", dashboard.available_keys, KeyRound],
-                  ["requests", dashboard.requests_today, Activity],
+                  ["available", dashboard.available_keys],
+                  ["requests", dashboard.requests_today],
                   [
                     "tokens",
                     Number(dashboard.input_tokens || 0) +
                       Number(dashboard.output_tokens || 0),
-                    Zap,
                   ],
-                  ["blockedScopes", dashboard.blocked_scopes, ShieldCheck],
-                ].map(([label, value, Icon]: any) => (
+                  ["blockedScopes", dashboard.blocked_scopes],
+                ].map(([label, value]: any) => (
                   <section className="stat-card" key={label}>
-                    <div className="stat-label">
-                      {t(label)}
-                      <Icon size={18} />
-                    </div>
+                    <div className="stat-label">{t(label)}</div>
                     <strong>{number(value)}</strong>
-                    <small>
-                      {label === "available"
-                        ? t("total") + " " + number(dashboard.upstream_keys)
-                        : label === "tokens"
-                          ? t("input_tokens") +
+                    {(label === "available" || label === "tokens") && (
+                      <small>
+                        {label === "available"
+                          ? t("total") + " " + number(dashboard.upstream_keys)
+                          : t("input_tokens") +
                             " " +
-                            number(dashboard.input_tokens)
-                          : "—"}
-                    </small>
+                            number(dashboard.input_tokens)}
+                      </small>
+                    )}
                   </section>
                 ))}
               </div>
@@ -691,7 +749,9 @@ function App() {
                       {columns[page]?.map((c) => (
                         <th key={c}>{t(c)}</th>
                       ))}
-                      {canAdd && <th>{t("actions")}</th>}
+                      {canAdd && (
+                        <th className="actions-column">{t("actions")}</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -709,7 +769,7 @@ function App() {
                             <td key={c}>{cell(c, r)}</td>
                           ))}
                           {canAdd && (
-                            <td>
+                            <td className="actions-column">
                               <div className="row-actions">
                                 <button
                                   onClick={() => {
@@ -719,6 +779,16 @@ function App() {
                                 >
                                   {t("edit")}
                                 </button>
+                                {page === "gateway_keys" && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setUsage({ ...r, initialKey: "" })
+                                    }
+                                  >
+                                    {t("howToUse")}
+                                  </button>
+                                )}
                                 {page === "upstream_keys" && (
                                   <>
                                     <button
@@ -809,7 +879,7 @@ function App() {
       {modal && (
         <div className="modal-overlay">
           <section
-            className="modal"
+            className="modal form-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -828,7 +898,12 @@ function App() {
             <form onSubmit={save}>
               {alert}
               <div className="form-fields">
-                {field("name", "text", "", !modal.id)}
+                {field(
+                  "name",
+                  "text",
+                  page === "gateway_keys" ? "keyNameHint" : "",
+                  !modal.id || page === "gateway_keys",
+                )}
                 {page === "projects" && (
                   <>{field("description", "text", "projectPoolHint")}</>
                 )}
@@ -846,48 +921,42 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
+                    <ModelMultiSelect
+                      models={models.map((row) => row.model)}
+                      defaultValue={modal.models || ["*"]}
+                      t={t}
+                    />
+                    <IPAllowlistField
+                      editing={!!modal.id}
+                      savedCIDRs={modal.cidrs}
+                      request={api}
+                      t={t}
+                    />
                     <label>
-                      {t("models")}
-                      <input
-                        name="models"
-                        required
-                        defaultValue={modal.models?.join(", ") || "*"}
-                        list="models"
-                      />
-                      <datalist id="models">
-                        {models.map((m) => (
-                          <option key={m.model}>{m.model}</option>
+                      {t("expires_in_days")}
+                      <select
+                        name="expires_in_days"
+                        required={!modal.id}
+                        defaultValue={modal.id ? "" : "30"}
+                      >
+                        {modal.id && (
+                          <option value="">{t("keepExpiry")}</option>
+                        )}
+                        {expiryDayOptions.map((days) => (
+                          <option key={days} value={days}>
+                            {t("expiryDays").replace("{days}", String(days))}
+                          </option>
                         ))}
-                      </datalist>
-                      <small>{t("modelHint")}</small>
-                    </label>
-                    <label>
-                      {t("cidrs")}
-                      <textarea
-                        name="cidrs"
-                        rows={4}
-                        required
-                        defaultValue={modal.cidrs?.join("\n") || ""}
-                      />
-                      <small>{t("cidrHint")}</small>
-                    </label>
-                    <label>
-                      {t("expires_at")}
-                      <input
-                        name="expires_at"
-                        type="datetime-local"
-                        defaultValue={
-                          modal.expires_at
-                            ? new Date(
-                                new Date(modal.expires_at).getTime() -
-                                  new Date().getTimezoneOffset() * 60000,
-                              )
-                                .toISOString()
-                                .slice(0, 16)
-                            : ""
-                        }
-                      />
+                      </select>
                       <small>{t("expiresHint")}</small>
+                      {modal.id && (
+                        <small>
+                          {t("expires_at")}:{" "}
+                          {modal.expires_at
+                            ? date(modal.expires_at)
+                            : t("never")}
+                        </small>
+                      )}
                     </label>
                   </>
                 )}
@@ -988,11 +1057,38 @@ function App() {
               {copied ? <Check size={17} /> : <Copy size={17} />}{" "}
               {t(copied ? "copied" : "copy")}
             </button>
-            <button className="secondary" onClick={() => setSecret("")}>
+            <button
+              className="secondary"
+              onClick={() => {
+                setUsage({ ...newKeyInfo, initialKey: secret });
+                setSecret("");
+                setNewKeyInfo(null);
+              }}
+            >
+              {t("howToUse")}
+            </button>
+            <button
+              className="secondary"
+              onClick={() => {
+                setSecret("");
+                setNewKeyInfo(null);
+              }}
+            >
               {t("close")}
             </button>
           </section>
         </div>
+      )}
+      {usage && (
+        <KeyUsageDialog
+          key={usage.id}
+          name={usage.name || t("gateway_keys")}
+          allowedModels={usage.models || ["*"]}
+          availableModels={models.map((row) => row.model)}
+          initialKey={usage.initialKey}
+          onClose={() => setUsage(null)}
+          t={t}
+        />
       )}
     </div>
   );

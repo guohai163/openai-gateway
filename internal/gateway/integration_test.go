@@ -211,14 +211,20 @@ func TestAdminCRUDAndSecrets(t *testing.T) {
 	if status, _ = adminReq("POST", "gateway_keys", `{"name":"client","cidrs":["127.0.0.1"],"models":["*"]}`, false); status != 403 {
 		t.Fatal("CSRF bypass")
 	}
-	status, b = adminReq("POST", "gateway_keys", `{"name":"client","cidrs":["127.0.0.1","2001:db8::/64"],"models":["*"]}`, true)
+	status, b = adminReq("POST", "gateway_keys", `{"name":"client","cidrs":["127.0.0.1","2001:db8::/64"],"models":["*"],"expires_in_days":30}`, true)
 	if status != 201 {
 		t.Fatalf("create key: %d %s", status, b)
 	}
 	var created map[string]string
 	_ = json.Unmarshal(b, &created)
-	if !strings.HasPrefix(created["key"], "gyai-") {
+	if !strings.HasPrefix(created["key"], "gk-ai-") || len(created["key"]) != len("gk-ai-")+43 {
 		t.Fatal("missing once-only secret")
+	}
+	if status, _ = request(t, srv.URL, "GET", "/v1/models", created["key"], ""); status != 200 {
+		t.Fatal("new key prefix was not accepted", status)
+	}
+	if status, _ = request(t, srv.URL, "GET", "/v1/models", "gk-ai-not-in-database", ""); status != 401 {
+		t.Fatal("key prefix alone bypassed authentication", status)
 	}
 	status, b = adminReq("GET", "gateway_keys", "", true)
 	if status != 200 || bytes.Contains(b, []byte(created["key"])) || bytes.Contains(b, []byte("token_hash")) {

@@ -102,7 +102,9 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(auth, "Bearer ")
-		if token == auth || !strings.HasPrefix(token, "gyai-") || len(token) > 256 {
+		// Existing issued keys remain valid; new keys always use gatewayKeyPrefix.
+		validPrefix := strings.HasPrefix(token, gatewayKeyPrefix) || strings.HasPrefix(token, "gyai-")
+		if token == auth || !validPrefix || len(token) > 256 {
 			writeError(w, 401, "invalid_api_key")
 			return
 		}

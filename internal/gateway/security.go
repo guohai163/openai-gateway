@@ -14,6 +14,8 @@ import (
 	"strings"
 )
 
+const gatewayKeyPrefix = "gk-ai-"
+
 func randomToken(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {

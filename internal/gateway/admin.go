@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,12 +23,27 @@ type resourceInput struct {
 	Enabled           *bool     `json:"enabled"`
 	Models            *[]string `json:"models"`
 	CIDRs             *[]string `json:"cidrs"`
-	ExpiresAt         *string   `json:"expires_at"`
+	ExpiresInDays     *int      `json:"expires_in_days"`
 }
+
+var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
 
 func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/"), "/"), "/")
 	resource := parts[0]
+	if resource == "client_ip" && len(parts) == 1 && r.Method == "GET" {
+		ip, err := clientIP(r, a.Config.TrustedProxies)
+		if err != nil {
+			writeError(w, 400, "client_ip_unavailable")
+			return
+		}
+		bits := 64
+		if ip.Is4() {
+			bits = 24
+		}
+		writeJSON(w, 200, map[string]string{"client_ip": ip.String(), "default_cidr": netip.PrefixFrom(ip, bits).String()})
+		return
+	}
 	if resource == "session" && r.Method == "GET" {
 		var name string
 		if a.DB.QueryRow(r.Context(), "SELECT username FROM administrators WHERE id=1").Scan(&name) != nil {
@@ -213,9 +230,13 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),upstream_project_id=coalesce($4,upstream_project_id),probe_model=coalesce($5,probe_model) WHERE id=$1", id, name, in.Enabled, in.UpstreamProjectID, in.ProbeModel)
 		}
 	case "gateway_keys":
+		if (create || in.Name != "") && (!privateKeyNamePattern.MatchString(name) || name != in.Name) {
+			writeError(w, 400, "invalid_key_name")
+			return
+		}
 		var cidrs, models any
 		var expiry any
-		changeExpiry := in.ExpiresAt != nil
+		changeExpiry := in.ExpiresInDays != nil
 		if in.CIDRs != nil {
 			parsed, err := parseCIDRs(*in.CIDRs)
 			if err != nil {
@@ -232,27 +253,51 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 400, "models_required")
 				return
 			}
+			selected := []string{}
+			seen := map[string]bool{}
 			for _, m := range *in.Models {
-				if strings.TrimSpace(m) == "" {
+				if m == "" || strings.TrimSpace(m) != m || (m == "*" && len(*in.Models) != 1) {
 					writeError(w, 400, "models_required")
 					return
 				}
+				if !seen[m] {
+					selected = append(selected, m)
+					seen[m] = true
+				}
 			}
-			models = *in.Models
+			var supported bool
+			if err := a.DB.QueryRow(ctx, `SELECT NOT EXISTS(
+ SELECT 1 FROM unnest($1::text[]) AS chosen(model)
+ WHERE chosen.model<>'*'
+ AND NOT EXISTS(SELECT 1 FROM models m WHERE m.model=chosen.model)
+ AND NOT EXISTS(SELECT 1 FROM gateway_keys g WHERE g.id=$2 AND chosen.model=ANY(g.models))
+)`, selected, id).Scan(&supported); err != nil {
+				adminDBError(w, err)
+				return
+			}
+			if !supported {
+				writeError(w, 400, "model_not_available")
+				return
+			}
+			models = selected
 		} else if create {
 			models = []string{"*"}
 		}
-		if in.ExpiresAt != nil && *in.ExpiresAt != "" {
-			t, err := time.Parse(time.RFC3339, *in.ExpiresAt)
-			if err != nil || !t.After(time.Now()) {
+		if create && in.ExpiresInDays == nil {
+			writeError(w, 400, "expiry_required")
+			return
+		}
+		if in.ExpiresInDays != nil {
+			days := *in.ExpiresInDays
+			if days != 30 && days != 90 && days != 120 {
 				writeError(w, 400, "invalid_expiry")
 				return
 			}
-			expiry = t
+			expiry = time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
 		}
 		if create {
-			token = "gyai-" + randomToken(32)
-			tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8)", id, name, hash(token), token[:13], enabled(in.Enabled), models, cidrs, expiry)
+			token = gatewayKeyPrefix + randomToken(32)
+			tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry)
 		} else {
 			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END WHERE id=$1", id, name, in.Enabled, models, cidrs, changeExpiry, expiry)
 		}
