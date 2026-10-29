@@ -109,6 +109,8 @@ docker compose down
 
 私有密钥操作栏和新密钥弹窗均提供“如何使用”，可生成发送 `hi` 的 curl 示例，自动使用当前网关地址。刚创建的密钥会直接带入示例；之后可填写保存的完整密钥，或通过 `GATEWAY_API_KEY` 环境变量使用。密钥输入仅保留在当前弹层，不会保存或上传。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
 
+`0.0.0.0/32` 只允许来源地址恰好为 `0.0.0.0` 的请求，并不表示全部地址。允许所有 IPv4 地址使用 `0.0.0.0/0`，所有 IPv6 地址使用 `::/0`，也可填写实际来源 IP 或网段；两种地址族分别匹配。认证成功但白名单拒绝时，错误响应的 `error.client_ip` 返回网关识别到的来源 IP，便于核对。
+
 ```sh
 curl https://ai.example.com/v1/models \
   -H "Authorization: Bearer $GYAI_KEY"
@@ -147,6 +149,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
 - 私有 Key 使用 `models` 数组设置模型权限；`["*"]` 表示全部当前及未来可用模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
 - `GET /logs|audit`；列表支持 `limit`（1–500）、`offset`。
+- `DELETE /gateway_keys/{id}` 删除私有密钥，要求管理员会话和 CSRF。删除会撤销原凭据、停用并隐藏该密钥，保留历史调用、用量与 Responses 归属；已删除密钥不可通过编辑重新启用。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。
 

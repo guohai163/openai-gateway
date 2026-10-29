@@ -100,6 +100,13 @@ export const messages = {
     copy: "Copy key",
     copied: "Copied",
     howToUse: "How to use",
+    delete: "Delete",
+    deletePrivateKey: "Delete private key",
+    confirmDeleteKey: "Delete key",
+    deleteKeyHint:
+      "This key will stop working for future requests and be removed from the list. Historical requests and usage records will be kept.",
+    keyDeleted: "Private key deleted",
+    not_found: "Resource not found or already deleted.",
     usageIntro:
       "Send hi with curl from an IP allowed by this key. The gateway address is filled in automatically; you can change the model below.",
     usagePrivateKey: "Private API key",
@@ -128,6 +135,8 @@ export const messages = {
     modelUnavailable: "Saved permission; currently unavailable upstream",
     clearSelection: "Clear",
     cidrHint: "One IP or CIDR per line. Both IPv4 and IPv6 are supported.",
+    zeroHostCIDRHint:
+      "0.0.0.0/32 allows only 0.0.0.0, and ::/128 allows only ::. To allow every address, use 0.0.0.0/0 for IPv4 or ::/0 for IPv6.",
     detectingClientIP: "Detecting your current IP…",
     defaultCIDRHint:
       "Prefilled from your current IP {ip}: IPv4 /24 or IPv6 /64. You can edit this value.",
@@ -290,6 +299,13 @@ export const messages = {
     copy: "复制密钥",
     copied: "已复制",
     howToUse: "如何使用",
+    delete: "删除",
+    deletePrivateKey: "删除私有密钥",
+    confirmDeleteKey: "删除密钥",
+    deleteKeyHint:
+      "删除后，该密钥的后续请求将无法使用，并从列表中移除。历史调用和用量记录会保留。",
+    keyDeleted: "私有密钥已删除",
+    not_found: "资源不存在或已删除。",
     usageIntro:
       "请从 IP 白名单允许的设备使用 curl 发送 hi。示例自动使用当前网关地址，可在下方修改模型。",
     usagePrivateKey: "私有 API 密钥",
@@ -315,6 +331,8 @@ export const messages = {
     modelUnavailable: "已保存的权限，当前上游暂不可用",
     clearSelection: "清空",
     cidrHint: "每行一个 IP 或 CIDR，支持 IPv4 和 IPv6。",
+    zeroHostCIDRHint:
+      "0.0.0.0/32 只允许 0.0.0.0，::/128 只允许 ::。如需允许全部地址，IPv4 请用 0.0.0.0/0，IPv6 请用 ::/0。",
     detectingClientIP: "正在识别当前 IP…",
     defaultCIDRHint:
       "已根据当前 IP {ip} 自动填写：IPv4 使用 /24，IPv6 使用 /64，可手动修改。",

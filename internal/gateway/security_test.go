@@ -62,3 +62,21 @@ func TestCIDRAndBackoff(t *testing.T) {
 		t.Fatal("retry-after ignored")
 	}
 }
+
+func TestZeroHostAndAllAddressCIDRs(t *testing.T) {
+	for _, tc := range []struct {
+		cidr, ip string
+		allowed  bool
+	}{
+		{"0.0.0.0/32", "0.0.0.0", true},
+		{"0.0.0.0/32", "198.51.100.42", false},
+		{"0.0.0.0/0", "198.51.100.42", true},
+		{"0.0.0.0/0", "2001:db8::42", false},
+		{"::/0", "2001:db8::42", true},
+		{"::/0", "198.51.100.42", false},
+	} {
+		if got := netip.MustParsePrefix(tc.cidr).Contains(netip.MustParseAddr(tc.ip)); got != tc.allowed {
+			t.Fatalf("%s contains %s: got %v", tc.cidr, tc.ip, got)
+		}
+	}
+}

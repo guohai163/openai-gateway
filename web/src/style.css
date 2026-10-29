@@ -1387,3 +1387,46 @@ tbody tr:hover .actions-column {
 .secret-modal > button {
   margin-bottom: 8px;
 }
+
+.row-actions .danger-link {
+  color: var(--danger);
+}
+.danger-button {
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--danger);
+  border-radius: 7px;
+  background: var(--danger);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 500;
+}
+.danger-button:hover {
+  filter: brightness(0.9);
+}
+.delete-key-body {
+  padding: 22px;
+}
+.delete-key-body > strong,
+.delete-key-body > code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.delete-key-body > code {
+  color: var(--muted);
+  margin-top: 8px;
+}
+.delete-key-body > p {
+  margin-top: 18px;
+  font-size: 13px;
+}
+.delete-key-body > .alert {
+  margin: 18px 0 0;
+}
+.cidr-scope-hint {
+  padding: 10px 12px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}

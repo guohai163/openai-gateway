@@ -102,6 +102,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found")
 		return
 	}
+	if resource == "gateway_keys" && len(parts) == 2 && r.Method == "DELETE" {
+		a.deleteGatewayKey(w, r, parts[1])
+		return
+	}
 	if len(parts) == 1 && r.Method == "GET" {
 		a.adminList(w, r, resource)
 		return
@@ -124,7 +128,7 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	var b []byte
 	e := a.DB.QueryRow(r.Context(), `SELECT json_build_object(
  'projects',(SELECT count(*) FROM projects),
- 'upstream_keys',(SELECT count(*) FROM upstream_keys),'gateway_keys',(SELECT count(*) FROM gateway_keys),
+ 'upstream_keys',(SELECT count(*) FROM upstream_keys),'gateway_keys',(SELECT count(*) FROM gateway_keys WHERE deleted_at IS NULL),
  'available_keys',(SELECT count(*) `+upstreamJoins+`WHERE `+available+`),
  'requests_today',(SELECT count(DISTINCT id) FROM request_logs WHERE created_at>=date_trunc('day',now()) AND kind='inference'),
  'input_tokens',(SELECT coalesce(sum(input_tokens),0) FROM request_logs WHERE kind='inference'),
@@ -140,7 +144,7 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	queries := map[string]string{
 		"projects":      `SELECT * FROM projects ORDER BY created_at DESC`,
 		"upstream_keys": `SELECT k.id,k.upstream_project_id,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
-		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at FROM gateway_keys ORDER BY created_at DESC`,
+		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
 		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
 		"audit":         `SELECT * FROM audit_logs ORDER BY created_at DESC`,
 		"models":        `SELECT DISTINCT model FROM models ORDER BY model`,
@@ -299,7 +303,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			token = gatewayKeyPrefix + randomToken(32)
 			tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry)
 		} else {
-			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END WHERE id=$1", id, name, in.Enabled, models, cidrs, changeExpiry, expiry)
+			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry)
 		}
 	default:
 		writeError(w, 404, "not_found")
@@ -365,6 +369,36 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, resource, id, 
 	a.audit(r.Context(), action, resource, id)
 	if e != nil {
 		writeError(w, 502, "upstream_operation_failed")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (a *App) deleteGatewayKey(w http.ResponseWriter, r *http.Request, id string) {
+	ctx := r.Context()
+	tx, err := a.DB.Begin(ctx)
+	if err != nil {
+		adminDBError(w, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	// Destroy the original credential hash as well as disabling the key, so an
+	// accidental enable or rollback to an older binary cannot restore the token.
+	tag, err := tx.Exec(ctx, "UPDATE gateway_keys SET enabled=false,deleted_at=now(),token_hash=$2 WHERE id=$1 AND deleted_at IS NULL", id, hash(randomToken(32)))
+	if err != nil {
+		adminDBError(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, 404, "not_found")
+		return
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id) VALUES($1,'delete','gateway_keys',$2)", newID(), id); err != nil {
+		adminDBError(w, err)
+		return
+	}
+	if err = tx.Commit(ctx); err != nil {
+		adminDBError(w, err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})

@@ -110,7 +110,7 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 		}
 		var k GatewayKey
 		var cidrs []string
-		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) FROM gateway_keys WHERE token_hash=$1 AND enabled AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs)
+		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) FROM gateway_keys WHERE token_hash=$1 AND enabled AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs)
 		if e != nil {
 			writeError(w, 401, "invalid_api_key")
 			return
@@ -129,7 +129,10 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 			}
 		}
 		if !allowed {
-			writeError(w, 403, "ip_not_allowed")
+			writeJSON(w, 403, map[string]any{"error": map[string]any{
+				"message": "ip_not_allowed", "type": "gateway_error", "param": nil,
+				"code": "ip_not_allowed", "client_ip": ip.String(),
+			}})
 			return
 		}
 		k.IP = ip

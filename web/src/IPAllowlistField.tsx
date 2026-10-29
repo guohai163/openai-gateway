@@ -15,6 +15,11 @@ export function IPAllowlistField({ editing, savedCIDRs, request, t }: Props) {
   const [sourceIP, setSourceIP] = useState("");
   const [failed, setFailed] = useState(false);
   const touched = useRef(false);
+  const zeroHostOnly = value
+    .split(/[\n,]/)
+    .some((cidr) =>
+      ["0.0.0.0", "0.0.0.0/32", "::", "::/128"].includes(cidr.trim()),
+    );
 
   useEffect(() => {
     if (editing) return;
@@ -54,6 +59,11 @@ export function IPAllowlistField({ editing, savedCIDRs, request, t }: Props) {
         }}
       />
       <small>{t("cidrHint")}</small>
+      {zeroHostOnly && (
+        <small className="cidr-scope-hint" role="status">
+          {t("zeroHostCIDRHint")}
+        </small>
+      )}
       {!editing && (loading || failed || sourceIP) && (
         <small role="status">
           {loading

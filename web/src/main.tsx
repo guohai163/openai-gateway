@@ -106,6 +106,7 @@ function App() {
     [modal, setModal] = useState<Row | null>(null),
     [catalog, setCatalog] = useState<Row | null>(null),
     [usage, setUsage] = useState<Row | null>(null),
+    [deleteTarget, setDeleteTarget] = useState<Row | null>(null),
     [newKeyInfo, setNewKeyInfo] = useState<Row | null>(null),
     [secret, setSecret] = useState(""),
     [copied, setCopied] = useState(false),
@@ -200,6 +201,21 @@ function App() {
       setCatalog({ ...result, name: row.name });
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deletePrivateKey() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`gateway_keys/${deleteTarget.id}`, { method: "DELETE" });
+      setDeleteTarget(null);
+      setNotice("keyDeleted");
+      await load();
+    } catch (error) {
+      fail(error);
     } finally {
       setBusy(false);
     }
@@ -780,14 +796,27 @@ function App() {
                                   {t("edit")}
                                 </button>
                                 {page === "gateway_keys" && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setUsage({ ...r, initialKey: "" })
-                                    }
-                                  >
-                                    {t("howToUse")}
-                                  </button>
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setUsage({ ...r, initialKey: "" })
+                                      }
+                                    >
+                                      {t("howToUse")}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="danger-link"
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setError("");
+                                        setDeleteTarget(r);
+                                      }}
+                                    >
+                                      {t("delete")}
+                                    </button>
+                                  </>
                                 )}
                                 {page === "upstream_keys" && (
                                   <>
@@ -1076,6 +1105,53 @@ function App() {
             >
               {t("close")}
             </button>
+          </section>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="modal-overlay">
+          <section
+            className="modal delete-key-modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-key-title"
+            aria-describedby="delete-key-description"
+          >
+            <div className="modal-heading">
+              <h2 id="delete-key-title">{t("deletePrivateKey")}</h2>
+              <button
+                type="button"
+                aria-label={t("close")}
+                disabled={busy}
+                onClick={() => setDeleteTarget(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="delete-key-body">
+              <strong>{deleteTarget.name}</strong>
+              <code>{deleteTarget.prefix}…</code>
+              <p id="delete-key-description">{t("deleteKeyHint")}</p>
+              {alert}
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => setDeleteTarget(null)}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={busy}
+                onClick={() => void deletePrivateKey()}
+              >
+                {t(busy ? "loading" : "confirmDeleteKey")}
+              </button>
+            </div>
           </section>
         </div>
       )}
