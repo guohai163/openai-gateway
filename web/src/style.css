@@ -386,7 +386,7 @@ nav .nav-dot {
 }
 .overview-grid {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  grid-template-columns: 1fr;
   gap: 24px;
   margin-bottom: 24px;
 }
@@ -424,27 +424,40 @@ nav .nav-dot {
   background: #f7faf8;
   flex-shrink: 0;
 }
-.balance-panel {
-  padding-bottom: 25px;
+.modal.catalog-modal {
+  width: min(760px, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
 }
-.balance-panel .panel-heading svg {
-  color: #98a69c;
+.catalog-body {
+  padding: 24px;
 }
-.unknown-balance {
-  font-size: 30px;
-  font-weight: 500;
-  padding: 22px 24px 13px;
+.catalog-body p {
+  margin: 0 0 12px;
+  color: #7d8d80;
+}
+.catalog-models {
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
 }
-.unknown-balance span {
-  color: #bcc7bf;
+.catalog-models code {
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #f0f4ef;
+  color: #5d7762;
 }
-.balance-panel p {
+.catalog-response summary {
+  cursor: pointer;
+}
+.catalog-response pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  background: #f0f4ef;
   font-size: 12px;
-  margin: 0 24px;
-  max-width: 380px;
-  line-height: 1.9;
 }
 .text-button {
   background: none;
@@ -452,6 +465,12 @@ nav .nav-dot {
   color: #28724f;
   font-size: 12px;
   margin: 22px 24px 0;
+}
+.data-panel .text-button {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .connection-panel {
   display: flex;
@@ -680,15 +699,7 @@ tr:last-child td {
   color: #b97a68;
   background: #faf0eb;
 }
-.filters {
-  display: flex;
-  gap: 8px;
-}
-.filters select {
-  max-width: 180px;
-  font-size: 11px;
-  padding: 6px;
-}
+
 .settings-list {
   padding: 0 24px 16px;
 }
@@ -787,6 +798,9 @@ tr:last-child td {
   margin: 20px 26px 0;
 }
 .modal-footer {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -818,22 +832,7 @@ tr:last-child td {
 .secret-modal > button {
   margin: 0 4px;
 }
-.official-list {
-  max-height: 200px;
-  overflow: auto;
-}
-.official-list button {
-  background: #f5f8f3;
-  width: 100%;
-  padding: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  justify-content: flex-start;
-}
-.official-list code {
-  color: #83997f;
-}
+
 .login-layout {
   min-height: 100vh;
   display: grid;
@@ -1076,13 +1075,6 @@ tr:last-child td {
   .login-main {
     min-height: 100vh;
     padding: 70px 30px;
-  }
-  .filters {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-  .filters select {
-    max-width: 100%;
   }
   .page-heading h1 {
     font-size: 26px;

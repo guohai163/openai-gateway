@@ -82,13 +82,12 @@ func seed(t *testing.T, a *App) {
 	t.Helper()
 	ctx := context.Background()
 	for i := 1; i <= 2; i++ {
-		org, project, kid := fmt.Sprintf("o%d", i), fmt.Sprintf("p%d", i), fmt.Sprintf("k%d", i)
+		kid := fmt.Sprintf("k%d", i)
 		secret, _ := seal(a.Config.MasterKey, "sk-test-"+kid)
-		admin, _ := seal(a.Config.MasterKey, "sk-admin-test")
 		for _, q := range []struct {
 			sql  string
 			args []any
-		}{{"INSERT INTO organizations(id,name,upstream_id,admin_secret,probe_model) VALUES($1,$1,$1,$2,'test-model')", []any{org, admin}}, {"INSERT INTO upstream_projects(id,org_id,name,upstream_id,probe_model) VALUES($1,$2,$1,$1,'test-model')", []any{project, org}}, {"INSERT INTO upstream_keys(id,org_id,upstream_project_id,name,secret,fingerprint,model_synced_at) VALUES($1,$2,$3,$1,$4,$1,now())", []any{kid, org, project, secret}}, {`INSERT INTO models VALUES($1,'test-model','{"id":"test-model","object":"model"}')`, []any{kid}}} {
+		}{{"INSERT INTO upstream_keys(id,name,secret,fingerprint,probe_model,model_synced_at) VALUES($1,$1,$2,$1,'test-model',now())", []any{kid, secret}}, {`INSERT INTO models VALUES($1,'test-model','{"id":"test-model","object":"model"}')`, []any{kid}}} {
 			if _, e := a.DB.Exec(ctx, q.sql, q.args...); e != nil {
 				t.Fatal(e)
 			}
@@ -180,7 +179,7 @@ func TestProxyRoutingAndOwnership(t *testing.T) {
 	}
 }
 func TestAdminCRUDAndSecrets(t *testing.T) {
-	a, srv := testApp(t)
+	_, srv := testApp(t)
 	status, b := request(t, srv.URL, "POST", "/admin/api/login", "", `{"username":"admin","password":"test-password-123"}`)
 	if status != 200 {
 		t.Fatalf("login %d %s", status, b)
@@ -235,23 +234,21 @@ func TestAdminCRUDAndSecrets(t *testing.T) {
 	if status, _ = adminReq("POST", "gateway_keys", `{"name":"bad","cidrs":[]}`, true); status != 400 {
 		t.Fatal("empty allowlist accepted")
 	}
-	status, b = adminReq("POST", "organizations", `{"name":"org","upstream_id":"org-safe","admin_key":"sk-admin-secret"}`, true)
-	if status != 201 {
-		t.Fatalf("create organization %d %s", status, b)
-	}
-	for _, path := range []string{"organizations", "projects", "upstream_keys", "gateway_keys", "dashboard", "settings", "audit", "logs", "costs"} {
+	for _, path := range []string{"projects", "upstream_keys", "gateway_keys", "dashboard", "settings", "audit", "logs"} {
 		status, b = adminReq("GET", path, "", true)
 		if status != 200 {
 			t.Fatalf("list %s: %d %s", path, status, b)
 		}
-		if bytes.Contains(b, []byte("sk-admin-secret")) || bytes.Contains(b, []byte("admin_secret")) {
-			t.Fatal("credential leaked")
+	}
+	for _, path := range []string{"organizations", "upstream_projects", "costs", "organizations/old/official_keys"} {
+		if status, _ = adminReq("GET", path, "", true); status != 404 {
+			t.Fatalf("removed endpoint %s returned %d", path, status)
 		}
 	}
-	var secret []byte
-	_ = a.DB.QueryRow(context.Background(), "SELECT admin_secret FROM organizations WHERE upstream_id='org-safe'").Scan(&secret)
-	if bytes.Contains(secret, []byte("sk-admin-secret")) {
-		t.Fatal("credential stored unencrypted")
+	for _, path := range []string{"organizations", "organizations/old/verify", "organizations/old/sync"} {
+		if status, _ = adminReq("POST", path, `{"name":"removed"}`, true); status != 404 {
+			t.Fatalf("removed endpoint %s returned %d", path, status)
+		}
 	}
 }
 func TestQuotaScopesProbeAndCooldown(t *testing.T) {
@@ -267,8 +264,8 @@ func TestQuotaScopesProbeAndCooldown(t *testing.T) {
 		t.Fatal("quota not classified")
 	}
 	remaining, _ := a.candidates(ctx, "test-model", "")
-	if len(remaining) != 1 || remaining[0].OrgID == u.OrgID {
-		t.Fatal("organization not blocked")
+	if len(remaining) != 1 || remaining[0].ID == u.ID {
+		t.Fatal("failed key not blocked")
 	}
 	var calls atomic.Int64
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -277,7 +274,7 @@ func TestQuotaScopesProbeAndCooldown(t *testing.T) {
 	}))
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
-	if e = a.probe(ctx, "organizations", u.OrgID); e != nil {
+	if e = a.probe(ctx, u.ID); e != nil {
 		t.Fatal(e)
 	}
 	remaining, _ = a.candidates(ctx, "test-model", "")
@@ -288,18 +285,18 @@ func TestQuotaScopesProbeAndCooldown(t *testing.T) {
 		t.Fatal("project quota")
 	}
 	var blocked bool
-	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM upstream_projects WHERE id=$1", u.ProjectID).Scan(&blocked)
+	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM upstream_keys WHERE id=$1", u.ID).Scan(&blocked)
 	if !blocked {
 		t.Fatal("project not blocked")
 	}
-	_, _ = a.DB.Exec(ctx, "UPDATE upstream_projects SET quota_blocked=false WHERE id=$1", u.ProjectID)
+	_, _ = a.DB.Exec(ctx, "UPDATE upstream_keys SET quota_blocked=false WHERE id=$1", u.ID)
 	a.classify(ctx, u, 429, "rate_limit_exceeded", http.Header{"Retry-After": []string{"90"}})
 	var until time.Time
-	_ = a.DB.QueryRow(ctx, "SELECT until_at FROM cooldowns WHERE scope_id=$1", u.OrgID).Scan(&until)
+	_ = a.DB.QueryRow(ctx, "SELECT until_at FROM cooldowns WHERE scope_id=$1", u.ID).Scan(&until)
 	if time.Until(until) < 85*time.Second {
 		t.Fatal("retry-after not respected")
 	}
-	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM organizations WHERE id=$1", u.OrgID).Scan(&blocked)
+	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM upstream_keys WHERE id=$1", u.ID).Scan(&blocked)
 	if blocked {
 		t.Fatal("rate limit treated as quota")
 	}
@@ -338,49 +335,6 @@ func TestSSEBindingBeforeEventAndUsageDedup(t *testing.T) {
 		t.Fatal("stream binding missing")
 	}
 }
-func TestOfficialStatsPaginationAndIdempotency(t *testing.T) {
-	a, _ := testApp(t)
-	seed(t, a)
-	var pages atomic.Int64
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer sk-admin-test" {
-			t.Error("wrong admin credential")
-		}
-		page := r.URL.Query().Get("page")
-		end := "false,\"next_page\":null"
-		value := "0.125"
-		if page == "" {
-			end = "true,\"next_page\":\"page-2\""
-			value = "0.25"
-		}
-		pages.Add(1)
-		start := time.Now().UTC().Truncate(24 * time.Hour).Unix()
-		if page != "" {
-			start -= 86400
-		}
-		if strings.HasSuffix(r.URL.Path, "costs") {
-			fmt.Fprintf(w, `{"data":[{"start_time":%d,"end_time":%d,"results":[{"project_id":"p1","api_key_id":"official-k1","amount":{"value":%s,"currency":"usd"}}]}],"has_more":%s}`, start, start+86400, value, end)
-		} else {
-			fmt.Fprintf(w, `{"data":[{"start_time":%d,"end_time":%d,"results":[{"project_id":"p1","api_key_id":"official-k1","model":"test-model","input_tokens":20,"output_tokens":5,"num_model_requests":1}]}],"has_more":%s}`, start, start+86400, end)
-		}
-	}))
-	defer up.Close()
-	a.Config.UpstreamURL = up.URL
-	for i := 0; i < 2; i++ {
-		if e := a.syncOrganization(context.Background(), "o1"); e != nil {
-			t.Fatal(e)
-		}
-	}
-	var count int
-	var amount string
-	if e := a.DB.QueryRow(context.Background(), "SELECT count(*),sum(amount)::text FROM official_buckets WHERE kind='costs'").Scan(&count, &amount); e != nil || count != 2 || amount != "0.375" {
-		t.Fatal(count, amount, e)
-	}
-	if pages.Load() != 12 {
-		t.Fatal("pagination not consumed", pages.Load())
-	}
-}
-
 func TestConcurrentDistributionAndFailover(t *testing.T) {
 	a, srv := testApp(t)
 	seed(t, a)
@@ -422,9 +376,9 @@ func TestConcurrentDistributionAndFailover(t *testing.T) {
 		t.Fatalf("failover %d %s", status, b)
 	}
 	var blocked bool
-	_ = a.DB.QueryRow(context.Background(), "SELECT quota_blocked FROM organizations WHERE id='o1'").Scan(&blocked)
+	_ = a.DB.QueryRow(context.Background(), "SELECT quota_blocked FROM upstream_keys WHERE id='k1'").Scan(&blocked)
 	if !blocked {
-		t.Fatal("failed org not blocked")
+		t.Fatal("failed key not blocked")
 	}
 }
 func TestNoReplayOnAmbiguousFailureAndStreamError(t *testing.T) {
@@ -490,13 +444,20 @@ func TestClientDisconnectCancelsUpstream(t *testing.T) {
 func TestModelRefreshPreservesCatalogOnFailure(t *testing.T) {
 	a, _ := testApp(t)
 	seed(t, a)
-	var fail atomic.Bool
+	var fail atomic.Int32
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if fail.Load() {
+		if r.Header.Get("OpenAI-Organization") != "" || r.Header.Get("OpenAI-Project") != "" || r.Header.Get("Authorization") != "Bearer sk-test-k1" {
+			t.Error("model discovery must use only the API key's own scope")
+		}
+		if fail.Load() == 1 {
 			w.WriteHeader(503)
 			return
 		}
-		fmt.Fprint(w, `{"data":[{"id":"test-model","object":"model"},{"id":"other-model","object":"model"}]}`)
+		if fail.Load() == 2 {
+			fmt.Fprint(w, `{"data":[{"id":"partial-model"},{"object":"model"}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"openai"},{"id":"other-model","object":"model"},{"id":"retired-model","shutdown_date":"2020-01-01"}]}`)
 	}))
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
@@ -504,14 +465,35 @@ func TestModelRefreshPreservesCatalogOnFailure(t *testing.T) {
 	if e := a.refreshModels(ctx, "k1"); e != nil {
 		t.Fatal(e)
 	}
-	fail.Store(true)
-	if e := a.refreshModels(ctx, "k1"); e == nil {
-		t.Fatal("failure not detected")
+	var snapshot string
+	if e := a.DB.QueryRow(ctx, "SELECT model_catalog::text FROM upstream_keys WHERE id='k1'").Scan(&snapshot); e != nil {
+		t.Fatal(e)
 	}
-	var count int
-	_ = a.DB.QueryRow(ctx, "SELECT count(*) FROM models WHERE upstream_key_id='k1'").Scan(&count)
-	if count != 2 {
-		t.Fatal("last good catalog lost")
+	if !strings.Contains(snapshot, "owned_by") || !strings.Contains(snapshot, "retired-model") {
+		t.Fatal("original catalog metadata was not saved")
+	}
+	w := httptest.NewRecorder()
+	a.admin(w, httptest.NewRequest("GET", "/admin/api/upstream_keys/k1/model_catalog", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "retired-model") || strings.Contains(w.Body.String(), "sk-test-k1") {
+		t.Fatal("catalog API did not expose the saved response safely", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	a.admin(w, httptest.NewRequest("GET", "/admin/api/upstream_keys/does-not-exist/model_catalog", nil))
+	if w.Code != 404 {
+		t.Fatal("unknown key catalog should return 404", w.Code)
+	}
+	for _, mode := range []int32{1, 2} {
+		fail.Store(mode)
+		if e := a.refreshModels(ctx, "k1"); e == nil {
+			t.Fatal("failure not detected")
+		}
+		var count int
+		_ = a.DB.QueryRow(ctx, "SELECT count(*) FROM models WHERE upstream_key_id='k1'").Scan(&count)
+		var saved string
+		_ = a.DB.QueryRow(ctx, "SELECT model_catalog::text FROM upstream_keys WHERE id='k1'").Scan(&saved)
+		if count != 2 || saved != snapshot {
+			t.Fatal("last good catalog lost")
+		}
 	}
 }
 func TestBindingConflictRejected(t *testing.T) {
@@ -527,7 +509,7 @@ func TestBindingConflictRejected(t *testing.T) {
 	}
 }
 
-func TestProbeBackoffNestedBlocksAndSyncFailure(t *testing.T) {
+func TestProbeBackoffAndInvalidCredentials(t *testing.T) {
 	a, _ := testApp(t)
 	seed(t, a)
 	ctx := context.Background()
@@ -535,11 +517,6 @@ func TestProbeBackoffNestedBlocksAndSyncFailure(t *testing.T) {
 	u := us[0]
 	var healthy atomic.Bool
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/v1/organization/") {
-			w.WriteHeader(401)
-			fmt.Fprint(w, `{"error":{"code":"invalid_api_key"}}`)
-			return
-		}
 		if !healthy.Load() {
 			w.WriteHeader(429)
 			fmt.Fprint(w, `{"error":{"code":"credit_balance_exhausted"}}`)
@@ -551,29 +528,23 @@ func TestProbeBackoffNestedBlocksAndSyncFailure(t *testing.T) {
 	a.Config.UpstreamURL = up.URL
 	a.classify(ctx, u, 429, "credit_balance_exhausted", http.Header{})
 	a.classify(ctx, u, 429, "project_spend_limit_exceeded", http.Header{})
-	if e := a.probe(ctx, "organizations", u.OrgID); e == nil {
+	if e := a.probe(ctx, u.ID); e == nil {
 		t.Fatal("failed probe accepted")
 	}
 	var failures int
 	var next time.Time
-	_ = a.DB.QueryRow(ctx, "SELECT probe_failures,next_probe_at FROM organizations WHERE id=$1", u.OrgID).Scan(&failures, &next)
+	_ = a.DB.QueryRow(ctx, "SELECT probe_failures,next_probe_at FROM upstream_keys WHERE id=$1", u.ID).Scan(&failures, &next)
 	if failures != 1 || time.Until(next) < 9*time.Minute {
 		t.Fatal("probe backoff not persisted")
 	}
 	healthy.Store(true)
-	if e := a.probe(ctx, "organizations", u.OrgID); e != nil {
-		t.Fatal("nested quota blocks deadlocked", e)
-	}
-	if e := a.probe(ctx, "upstream_projects", u.ProjectID); e != nil {
-		t.Fatal(e)
-	}
-	if e := a.syncOrganization(ctx, u.OrgID); e == nil {
-		t.Fatal("admin auth error not recorded")
+	if e := a.probe(ctx, u.ID); e != nil {
+		t.Fatal("quota recovery failed", e)
 	}
 	var blocked bool
-	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM organizations WHERE id=$1", u.OrgID).Scan(&blocked)
+	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM upstream_keys WHERE id=$1", u.ID).Scan(&blocked)
 	if blocked {
-		t.Fatal("statistics error blocked inference")
+		t.Fatal("successful probe did not clear quota block")
 	}
 	a.classify(ctx, u, 401, "invalid_api_key", http.Header{})
 	list, _ := a.candidates(ctx, "test-model", "")
@@ -582,8 +553,8 @@ func TestProbeBackoffNestedBlocksAndSyncFailure(t *testing.T) {
 			t.Fatal("invalid credential eligible")
 		}
 	}
-	_, _ = a.DB.Exec(ctx, "UPDATE organizations SET quota_blocked=true WHERE id=$1", u.OrgID)
-	if e := a.probe(ctx, "organizations", u.OrgID); e == nil {
+	_, _ = a.DB.Exec(ctx, "UPDATE upstream_keys SET quota_blocked=true WHERE id=$1", u.ID)
+	if e := a.probe(ctx, u.ID); e == nil {
 		t.Fatal("invalid credential was probed")
 	}
 }

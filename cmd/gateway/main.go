@@ -35,7 +35,7 @@ func main() {
 		defer c()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-	slog.Info("Guangyu AI Gateway listening", "address", c.Addr)
+	slog.Info("AI Gateway listening", "address", c.Addr)
 	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("HTTP server failed")
 		cancel()

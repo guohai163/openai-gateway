@@ -11,17 +11,16 @@ import (
 )
 
 type Upstream struct {
-	ID, ProjectID, OrgID, Project, Org, Model, ProbeModel string
-	Secret                                                []byte
+	ID, Project, Model, ProbeModel string
+	Secret                         []byte
 }
 
-const upstreamJoins = `FROM upstream_keys k JOIN organizations o ON o.id=k.org_id LEFT JOIN upstream_projects p ON p.org_id=k.org_id AND p.upstream_id=k.upstream_project_id `
-const probeModel = `coalesce(nullif(k.probe_model,''),o.probe_model)`
-const selectUpstream = `SELECT k.id,coalesce(p.id,''),k.org_id,k.upstream_project_id,o.upstream_id,k.secret,` + probeModel + ` ` + upstreamJoins
-const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND (p.id IS NULL OR (p.enabled AND NOT p.quota_blocked)) AND o.enabled AND NOT o.quota_blocked AND k.model_synced_at IS NOT NULL`
+const upstreamJoins = `FROM upstream_keys k `
+const selectUpstream = `SELECT k.id,k.upstream_project_id,k.secret,k.probe_model ` + upstreamJoins
+const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
-	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id))) ORDER BY k.id`, model, pin)
+	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) ORDER BY k.id`, model, pin)
 	if e != nil {
 		return nil, e
 	}
@@ -29,7 +28,7 @@ func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, er
 	out := []Upstream{}
 	for rows.Next() {
 		var u Upstream
-		if e = rows.Scan(&u.ID, &u.ProjectID, &u.OrgID, &u.Project, &u.Org, &u.Secret, &u.ProbeModel); e != nil {
+		if e = rows.Scan(&u.ID, &u.Project, &u.Secret, &u.ProbeModel); e != nil {
 			return nil, e
 		}
 		u.Model = model
@@ -58,7 +57,7 @@ func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, 
 		return nil, e
 	}
 	req.Header.Set("Authorization", "Bearer "+secret)
-	req.Header.Set("OpenAI-Organization", u.Org)
+	// The API key determines its organization; only an optional project scope is explicit.
 	if u.Project != "" {
 		req.Header.Set("OpenAI-Project", u.Project)
 	}
@@ -97,33 +96,19 @@ func retryAfter(s string) time.Duration {
 	return 30 * time.Second
 }
 func (a *App) classify(ctx context.Context, u Upstream, status int, code string, h http.Header) bool {
-	scope, id := "", ""
-	quota := false
 	switch code {
-	case "credit_balance_exhausted", "organization_spend_limit_exceeded", "organization_usage_limit_exceeded":
-		scope, id, quota = "organization", u.OrgID, true
-	case "project_spend_limit_exceeded":
-		scope, id, quota = "project", u.ProjectID, true
-		if id == "" {
-			scope, id = "key", u.ID
-		}
-	case "insufficient_quota":
-		scope, id, quota = "key", u.ID, true
+	case "credit_balance_exhausted", "organization_spend_limit_exceeded", "organization_usage_limit_exceeded", "project_spend_limit_exceeded", "insufficient_quota":
+		// Without organization ownership, only the key that received the error is blocked.
+		_, e := a.DB.Exec(ctx, "UPDATE upstream_keys SET quota_blocked=true,last_error=$2,next_probe_at=COALESCE(next_probe_at,now()+interval '5 minutes') WHERE id=$1", u.ID, code)
+		return e == nil
 	case "invalid_api_key", "invalid_authentication":
 		_, e := a.DB.Exec(ctx, "UPDATE upstream_keys SET invalid=true,last_error=$2 WHERE id=$1", u.ID, code)
 		return e == nil
 	case "rate_limit_exceeded", "slow_down", "rate_limit_error":
-		// Unspecified rate-limit scope is conservatively organization + model.
-		scope, id = "organization", u.OrgID
-		_, e := a.DB.Exec(ctx, `INSERT INTO cooldowns VALUES($1,$2,$3,$4) ON CONFLICT(scope,scope_id,model) DO UPDATE SET until_at=GREATEST(cooldowns.until_at,EXCLUDED.until_at)`, scope, id, u.Model, time.Now().Add(retryAfter(h.Get("Retry-After"))))
+		_, e := a.DB.Exec(ctx, `INSERT INTO cooldowns VALUES('key',$1,$2,$3) ON CONFLICT(scope,scope_id,model) DO UPDATE SET until_at=GREATEST(cooldowns.until_at,EXCLUDED.until_at)`, u.ID, u.Model, time.Now().Add(retryAfter(h.Get("Retry-After"))))
 		return e == nil
 	case "model_not_found":
 		_, e := a.DB.Exec(ctx, "DELETE FROM models WHERE upstream_key_id=$1 AND model=$2", u.ID, u.Model)
-		return e == nil
-	}
-	if quota {
-		table := map[string]string{"organization": "organizations", "project": "upstream_projects", "key": "upstream_keys"}[scope]
-		_, e := a.DB.Exec(ctx, "UPDATE "+table+" SET quota_blocked=true,last_error=$2,next_probe_at=COALESCE(next_probe_at,now()+interval '5 minutes') WHERE id=$1", id, code)
 		return e == nil
 	}
 	return false

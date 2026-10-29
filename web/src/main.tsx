@@ -19,7 +19,6 @@ import {
   Settings,
   ShieldCheck,
   Terminal,
-  Wallet,
   X,
   Zap,
 } from "lucide-react";
@@ -28,12 +27,10 @@ import "./style.css";
 type Row = Record<string, any>;
 type Page =
   | "overview"
-  | "organizations"
   | "projects"
   | "upstream_keys"
   | "gateway_keys"
   | "logs"
-  | "costs"
   | "settings"
   | "audit";
 let csrf = "";
@@ -70,23 +67,17 @@ function App() {
     [data, setData] = useState<Row[]>([]),
     [dashboard, setDashboard] = useState<Row>({}),
     [settings, setSettings] = useState<Row>({});
-  const [orgs, setOrgs] = useState<Row[]>([]),
-    [upstreamProjects, setUpstreamProjects] = useState<Row[]>([]),
-    [keys, setKeys] = useState<Row[]>([]),
-    [models, setModels] = useState<Row[]>([]),
-    [official, setOfficial] = useState<Row[]>([]);
+  const [models, setModels] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [modal, setModal] = useState<Row | null>(null),
+    [catalog, setCatalog] = useState<Row | null>(null),
     [secret, setSecret] = useState(""),
     [copied, setCopied] = useState(false),
     [offset, setOffset] = useState(0),
     [query, setQuery] = useState("");
-  const [org, setOrg] = useState(""),
-    [project, setProject] = useState(""),
-    [key, setKey] = useState("");
   useEffect(() => {
     const fn = () => setBrowser(navigator.languages);
     addEventListener("languagechange", fn);
@@ -114,24 +105,11 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [o, p, k, m] = await Promise.all(
-        ["organizations", "upstream_projects", "upstream_keys", "models"].map(
-          (p) => api(p + "?limit=500"),
-        ),
-      );
-      setOrgs(o.data);
-      setUpstreamProjects(p.data);
-      setKeys(k.data);
-      setModels(m.data);
+      setModels((await api("models?limit=500")).data);
       if (page === "overview") setDashboard(await api("dashboard"));
       else if (page === "settings") setSettings(await api("settings"));
       else {
         const q = new URLSearchParams({ limit: "100", offset: String(offset) });
-        if (page === "costs") {
-          q.set("org_id", org);
-          q.set("project_id", project);
-          q.set("api_key_id", key);
-        }
         setData((await api(page + "?" + q)).data);
       }
     } catch (e) {
@@ -142,7 +120,7 @@ function App() {
   }
   useEffect(() => {
     if (session) void load();
-  }, [session, page, offset, org, project, key]);
+  }, [session, page, offset]);
   async function login(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -167,6 +145,18 @@ function App() {
       await api(`${page}/${id}/${name}`, { method: "POST", body: "{}" });
       setNotice("successful");
       await load();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function showCatalog(row: Row) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api(`upstream_keys/${row.id}/model_catalog`);
+      setCatalog({ ...result, name: row.name });
     } catch (e) {
       fail(e);
     } finally {
@@ -276,7 +266,7 @@ function App() {
         <aside className="login-art">
           {mark}
           <div>
-            <span className="eyebrow">GUANGYU / AI INFRASTRUCTURE</span>
+            <span className="eyebrow">AI INFRASTRUCTURE</span>
             <h1>
               {language === "zh" ? (
                 <>
@@ -343,58 +333,33 @@ function App() {
     );
   const nav: [Page, React.ReactNode][] = [
     ["overview", <LayoutDashboard size={18} />],
-    ["organizations", <Globe size={18} />],
-    ["projects", <Box size={18} />],
     ["upstream_keys", <KeyRound size={18} />],
+    ["projects", <Box size={18} />],
     ["gateway_keys", <ShieldCheck size={18} />],
     ["logs", <Activity size={18} />],
-    ["costs", <Wallet size={18} />],
     ["audit", <Terminal size={18} />],
     ["settings", <Settings size={18} />],
   ];
-  const canAdd = [
-    "organizations",
-    "projects",
-    "upstream_keys",
-    "gateway_keys",
-  ].includes(page);
+  const canAdd = ["projects", "upstream_keys", "gateway_keys"].includes(page);
   const status = (r: Row) =>
-    !r.enabled ||
-    r.upstream_project_enabled === false ||
-    r.org_enabled === false
+    !r.enabled
       ? "disabled"
       : r.invalid
         ? "invalid"
-        : r.quota_blocked ||
-            r.upstream_project_quota_blocked ||
-            r.org_quota_blocked
+        : r.quota_blocked
           ? "blocked"
           : page === "upstream_keys" && !r.model_synced_at
             ? "pending"
             : "active";
   const columns: Record<string, string[]> = {
-    organizations: [
-      "name",
-      "admin_status",
-      "admin_checked_at",
-      "projects_access",
-      "costs_access",
-      "status",
-      "probe_model",
-      "next_probe_at",
-      "synced_at",
-      "sync_error",
-    ],
     projects: ["name", "description", "status", "created_at"],
     upstream_keys: [
       "name",
-      "org_name",
       "upstream_project_id",
       "models",
       "status",
       "model_synced_at",
       "next_probe_at",
-      "upstream_api_key_id",
     ],
     gateway_keys: ["name", "models", "cidrs", "status", "expires_at"],
     logs: [
@@ -411,43 +376,10 @@ function App() {
       "error_code",
       "kind",
     ],
-    costs: [
-      "start_time",
-      "org_name",
-      "project_name",
-      "upstream_name",
-      "kind",
-      "model",
-      "amount",
-      "currency",
-      "input_tokens",
-      "output_tokens",
-      "num_requests",
-    ],
     audit: ["created_at", "action", "resource", "resource_id"],
   };
   function cell(c: string, r: Row) {
     const v = r[c];
-    if (c === "admin_status") {
-      return (
-        <span
-          className={
-            "badge " +
-            (v === "valid"
-              ? "active"
-              : v === "unchecked"
-                ? "pending"
-                : "invalid")
-          }
-        >
-          <i />
-          {t("admin_" + v)}
-        </span>
-      );
-    }
-    if (c === "projects_access" || c === "costs_access") {
-      return t("access_" + v);
-    }
     if (c === "status")
       return page === "logs" ? (
         <span className={`http-status ${v < 400 ? "success" : "failed"}`}>
@@ -460,17 +392,22 @@ function App() {
         </span>
       );
     if (
-      [
-        "created_at",
-        "expires_at",
-        "model_synced_at",
-        "synced_at",
-        "next_probe_at",
-        "admin_checked_at",
-      ].includes(c)
+      ["created_at", "expires_at", "model_synced_at", "next_probe_at"].includes(
+        c,
+      )
     )
       return c === "expires_at" && !v ? t("never") : date(v);
-    if (c === "start_time") return date(v * 1000);
+    if (c === "models" && page === "upstream_keys")
+      return (
+        <button
+          className="text-button"
+          disabled={busy}
+          onClick={() => void showCatalog(r)}
+        >
+          {number(v?.length || 0)} {t("modelCount")}
+          <ChevronRight size={14} />
+        </button>
+      );
     if (c === "models" || c === "cidrs")
       return (
         <div className="model-tags">
@@ -481,15 +418,13 @@ function App() {
         </div>
       );
     if (c === "duration_ms") return number(v) + " ms";
-    if (["input_tokens", "output_tokens", "num_requests", "amount"].includes(c))
-      return number(v);
-    if (c === "sync_error" || c === "admin_error") return v ? t(v) : "—";
+    if (["input_tokens", "output_tokens"].includes(c)) return number(v);
     if (c === "kind") return t(v === "probe" ? "probeKind" : v);
     if (c === "name")
       return (
         <div className="resource-name">
           <strong>{v}</strong>
-          <small>{r.prefix ? r.prefix + "…" : r.upstream_id || ""}</small>
+          <small>{r.prefix ? r.prefix + "…" : ""}</small>
         </div>
       );
     return v || "—";
@@ -507,19 +442,6 @@ function App() {
       {hint && <small>{t(hint)}</small>}
     </label>
   );
-  const select = (n: string, rows: Row[]) => (
-    <label key={n}>
-      {t(n)}
-      <select name={n} required defaultValue={modal?.[n] || ""}>
-        <option value="">{t("select")}</option>
-        {rows.map((r) => (
-          <option key={r.id} value={r.id}>
-            {r.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
   return (
     <div className="app">
       <aside className="sidebar">
@@ -528,9 +450,9 @@ function App() {
         </button>
         <div className="sidebar-label">{t("workspace")}</div>
         <nav>
-          {nav.map(([p, icon], i) => (
+          {nav.map(([p, icon]) => (
             <React.Fragment key={p}>
-              {i === 7 && (
+              {p === "audit" && (
                 <div className="sidebar-label administration">
                   {t("administration")}
                 </div>
@@ -586,20 +508,18 @@ function App() {
           <div className="page-heading">
             <div>
               <span className="eyebrow">
-                {page === "overview" ? "GUANGYU GATEWAY" : t("console")}
+                {page === "overview" ? "AI GATEWAY" : t("console")}
               </span>
               <h1>{t(page)}</h1>
               <p>
                 {t(
                   page === "overview"
                     ? "introduction"
-                    : page === "costs"
-                      ? "statsHint"
-                      : page === "settings"
-                        ? "settingsHint"
-                        : page === "projects"
-                          ? "projectPoolHint"
-                          : "subtitle",
+                    : page === "settings"
+                      ? "settingsHint"
+                      : page === "projects"
+                        ? "projectPoolHint"
+                        : "subtitle",
                 )}
               </p>
             </div>
@@ -617,7 +537,6 @@ function App() {
                   className="primary"
                   onClick={() => {
                     setModal({});
-                    setOfficial([]);
                     setError("");
                   }}
                 >
@@ -676,7 +595,7 @@ function App() {
                     <span className="muted">{t("total")}</span>
                   </div>
                   {[
-                    ["organizations", Globe, dashboard.organizations],
+                    ["upstream_keys", KeyRound, dashboard.upstream_keys],
                     ["projects", Box, dashboard.projects],
                     ["gateway_keys", KeyRound, dashboard.gateway_keys],
                   ].map(([label, Icon, value]: any) => (
@@ -693,24 +612,6 @@ function App() {
                       <ChevronRight size={17} />
                     </button>
                   ))}
-                </section>
-                <section className="panel balance-panel">
-                  <div className="panel-heading">
-                    <h2>{t("exactBalance")}</h2>
-                    <Wallet size={18} />
-                  </div>
-                  <strong className="unknown-balance">
-                    {t("unknown")}
-                    <span>—</span>
-                  </strong>
-                  <p>{t("balanceHint")}</p>
-                  <button
-                    className="text-button"
-                    onClick={() => navigate("costs")}
-                  >
-                    {t("costs")}
-                    <ArrowUpRight size={16} />
-                  </button>
                 </section>
               </div>
               <div className="connection-panel">
@@ -729,9 +630,9 @@ function App() {
                   <p>{t("setupHint")}</p>
                   <button
                     className="primary"
-                    onClick={() => navigate("organizations")}
+                    onClick={() => navigate("upstream_keys")}
                   >
-                    {t("add")} {t("organizations")}
+                    {t("add")} {t("upstream_keys")}
                     <ArrowUpRight size={15} />
                   </button>
                 </section>
@@ -745,20 +646,18 @@ function App() {
                   <Settings size={18} />
                 </div>
                 <div className="settings-list">
-                  {Object.entries(settings)
-                    .filter(([k]) => k !== "balance")
-                    .map(([k, v]) => (
-                      <div key={k}>
-                        <span>{t(k)}</span>
-                        <code>
-                          {typeof v === "boolean"
-                            ? t(v ? "on" : "off")
-                            : Array.isArray(v)
-                              ? v.join(", ") || "—"
-                              : String(v)}
-                        </code>
-                      </div>
-                    ))}
+                  {Object.entries(settings).map(([k, v]) => (
+                    <div key={k}>
+                      <span>{t(k)}</span>
+                      <code>
+                        {typeof v === "boolean"
+                          ? t(v ? "on" : "off")
+                          : Array.isArray(v)
+                            ? v.join(", ") || "—"
+                            : String(v)}
+                      </code>
+                    </div>
+                  ))}
                 </div>
               </section>
               <section className="privacy">
@@ -781,64 +680,6 @@ function App() {
                     onChange={(e) => setQuery(e.target.value)}
                   />
                 </label>
-                {page === "costs" && (
-                  <div className="filters">
-                    <select
-                      value={org}
-                      onChange={(e) => {
-                        setOrg(e.target.value);
-                        setProject("");
-                        setKey("");
-                        setOffset(0);
-                      }}
-                    >
-                      <option value="">{t("filter")}</option>
-                      {orgs.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={project}
-                      onChange={(e) => {
-                        setProject(e.target.value);
-                        setKey("");
-                        setOffset(0);
-                      }}
-                    >
-                      <option value="">{t("allUpstreamProjects")}</option>
-                      {upstreamProjects
-                        .filter((p) => !org || p.org_id === org)
-                        .map((p) => (
-                          <option key={p.id} value={p.upstream_id}>
-                            {p.name}
-                          </option>
-                        ))}
-                    </select>
-                    <select
-                      value={key}
-                      onChange={(e) => {
-                        setKey(e.target.value);
-                        setOffset(0);
-                      }}
-                    >
-                      <option value="">{t("allKeys")}</option>
-                      {keys
-                        .filter(
-                          (k) =>
-                            k.upstream_api_key_id &&
-                            (!org || k.org_id === org) &&
-                            (!project || k.upstream_project_id === project),
-                        )
-                        .map((k) => (
-                          <option key={k.id} value={k.upstream_api_key_id}>
-                            {k.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
                 <span className="record-count">
                   {number(data.length)} {t("total")}
                 </span>
@@ -873,7 +714,6 @@ function App() {
                                 <button
                                   onClick={() => {
                                     setModal(r);
-                                    setOfficial([]);
                                     setError("");
                                   }}
                                 >
@@ -899,22 +739,6 @@ function App() {
                                     )}
                                   </>
                                 )}
-                                {page === "organizations" && (
-                                  <>
-                                    <button
-                                      disabled={busy || !r.has_admin_key}
-                                      onClick={() => action(r.id, "verify")}
-                                    >
-                                      {t("verifyAdmin")}
-                                    </button>
-                                    <button
-                                      disabled={busy || !r.has_admin_key}
-                                      onClick={() => action(r.id, "sync")}
-                                    >
-                                      {t("sync")}
-                                    </button>
-                                  </>
-                                )}
                                 {r.quota_blocked && (
                                   <button
                                     disabled={busy}
@@ -927,11 +751,6 @@ function App() {
                               {r.model_sync_error && (
                                 <small className="error-hint">
                                   {t(r.model_sync_error)}
-                                </small>
-                              )}
-                              {r.admin_error && (
-                                <small className="error-hint">
-                                  {t(r.admin_error)}
                                 </small>
                               )}
                               {r.last_error && (
@@ -1010,104 +829,19 @@ function App() {
               {alert}
               <div className="form-fields">
                 {field("name", "text", "", !modal.id)}
-                {page === "organizations" && (
-                  <>
-                    {!modal.id && field("upstream_id", "text", "", true)}
-                    {field("admin_key", "password", "adminHint", !modal.id)}
-                    {field("probe_model", "text", "probeHint")}
-                  </>
-                )}
                 {page === "projects" && (
                   <>{field("description", "text", "projectPoolHint")}</>
                 )}
                 {page === "upstream_keys" && (
                   <>
-                    {!modal.id && (
-                      <>
-                        {select("org_id", orgs)}
-                        {field("key", "password", "upstreamHint", true)}
-                      </>
-                    )}
+                    {!modal.id &&
+                      field("key", "password", "upstreamHint", true)}
                     {field(
                       "upstream_project_id",
                       "text",
                       "upstreamProjectHint",
                     )}
-                    <label>
-                      {t("upstream_api_key_id")}
-                      <input
-                        name="upstream_api_key_id"
-                        defaultValue={modal.upstream_api_key_id || ""}
-                        list="official-keys"
-                      />
-                      <datalist id="official-keys">
-                        {official.map((k) => (
-                          <option key={k.id} value={k.id}>
-                            {k.name} · {k.redacted_value}
-                          </option>
-                        ))}
-                      </datalist>
-                      <small>{t("officialHint")}</small>
-                    </label>
-                    <button
-                      className="secondary"
-                      type="button"
-                      disabled={busy}
-                      onClick={async (e) => {
-                        const form = e.currentTarget.closest("form")!;
-                        const pid =
-                          modal.org_id || new FormData(form).get("org_id");
-                        if (!pid) {
-                          setError("upstream_key_required");
-                          return;
-                        }
-                        setBusy(true);
-                        try {
-                          setOfficial(
-                            (await api(`organizations/${pid}/official_keys`))
-                              .data,
-                          );
-                        } catch (e) {
-                          fail(e);
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      {t("officialKeys")}
-                      <RefreshCw size={14} />
-                    </button>
-                    {official.length > 0 && (
-                      <div className="official-list">
-                        {official.map((k) => (
-                          <button
-                            key={k.id}
-                            type="button"
-                            onClick={(e) => {
-                              (
-                                e.currentTarget
-                                  .closest("form")!
-                                  .elements.namedItem(
-                                    "upstream_api_key_id",
-                                  ) as HTMLInputElement
-                              ).value = k.id;
-                              const form = e.currentTarget.closest("form")!;
-                              (
-                                form.elements.namedItem(
-                                  "upstream_project_id",
-                                ) as HTMLInputElement
-                              ).value = k.upstream_project_id || "";
-                            }}
-                          >
-                            {k.name}
-                            <code>{k.id}</code>
-                            <small>
-                              {k.redacted_value} · {k.upstream_project_name}
-                            </small>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {field("probe_model", "text", "probeHint")}
                   </>
                 )}
                 {page === "gateway_keys" && (
@@ -1181,6 +915,49 @@ function App() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {catalog && (
+        <div className="modal-overlay">
+          <section
+            className="modal catalog-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="catalog-title"
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="eyebrow">{catalog.name}</span>
+                <h2 id="catalog-title">{t("modelCatalog")}</h2>
+              </div>
+              <button aria-label={t("close")} onClick={() => setCatalog(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="catalog-body">
+              <p>
+                {t("model_synced_at")}: {date(catalog.synced_at)}
+              </p>
+              {catalog.catalog ? (
+                <>
+                  <p>
+                    {number(catalog.catalog.data.length)} {t("modelCount")}
+                  </p>
+                  <div className="catalog-models">
+                    {catalog.catalog.data.map((m: Row) => (
+                      <code key={m.id}>{m.id}</code>
+                    ))}
+                  </div>
+                  <details className="catalog-response">
+                    <summary>{t("rawModelCatalog")}</summary>
+                    <pre>{JSON.stringify(catalog.catalog, null, 2)}</pre>
+                  </details>
+                </>
+              ) : (
+                <p>{t("noCatalog")}</p>
+              )}
+            </div>
           </section>
         </div>
       )}
