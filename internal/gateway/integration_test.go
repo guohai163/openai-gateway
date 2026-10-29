@@ -88,7 +88,7 @@ func seed(t *testing.T, a *App) {
 		for _, q := range []struct {
 			sql  string
 			args []any
-		}{{"INSERT INTO organizations(id,name,upstream_id,admin_secret) VALUES($1,$1,$1,$2)", []any{org, admin}}, {"INSERT INTO projects(id,org_id,name,upstream_id,probe_model) VALUES($1,$2,$1,$1,'test-model')", []any{project, org}}, {"INSERT INTO upstream_keys(id,project_id,name,secret,fingerprint,model_synced_at) VALUES($1,$2,$1,$3,$1,now())", []any{kid, project, secret}}, {`INSERT INTO models VALUES($1,'test-model','{"id":"test-model","object":"model"}')`, []any{kid}}} {
+		}{{"INSERT INTO organizations(id,name,upstream_id,admin_secret,probe_model) VALUES($1,$1,$1,$2,'test-model')", []any{org, admin}}, {"INSERT INTO upstream_projects(id,org_id,name,upstream_id,probe_model) VALUES($1,$2,$1,$1,'test-model')", []any{project, org}}, {"INSERT INTO upstream_keys(id,org_id,upstream_project_id,name,secret,fingerprint,model_synced_at) VALUES($1,$2,$3,$1,$4,$1,now())", []any{kid, org, project, secret}}, {`INSERT INTO models VALUES($1,'test-model','{"id":"test-model","object":"model"}')`, []any{kid}}} {
 			if _, e := a.DB.Exec(ctx, q.sql, q.args...); e != nil {
 				t.Fatal(e)
 			}
@@ -288,11 +288,11 @@ func TestQuotaScopesProbeAndCooldown(t *testing.T) {
 		t.Fatal("project quota")
 	}
 	var blocked bool
-	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM projects WHERE id=$1", u.ProjectID).Scan(&blocked)
+	_ = a.DB.QueryRow(ctx, "SELECT quota_blocked FROM upstream_projects WHERE id=$1", u.ProjectID).Scan(&blocked)
 	if !blocked {
 		t.Fatal("project not blocked")
 	}
-	_, _ = a.DB.Exec(ctx, "UPDATE projects SET quota_blocked=false WHERE id=$1", u.ProjectID)
+	_, _ = a.DB.Exec(ctx, "UPDATE upstream_projects SET quota_blocked=false WHERE id=$1", u.ProjectID)
 	a.classify(ctx, u, 429, "rate_limit_exceeded", http.Header{"Retry-After": []string{"90"}})
 	var until time.Time
 	_ = a.DB.QueryRow(ctx, "SELECT until_at FROM cooldowns WHERE scope_id=$1", u.OrgID).Scan(&until)
@@ -564,7 +564,7 @@ func TestProbeBackoffNestedBlocksAndSyncFailure(t *testing.T) {
 	if e := a.probe(ctx, "organizations", u.OrgID); e != nil {
 		t.Fatal("nested quota blocks deadlocked", e)
 	}
-	if e := a.probe(ctx, "projects", u.ProjectID); e != nil {
+	if e := a.probe(ctx, "upstream_projects", u.ProjectID); e != nil {
 		t.Fatal(e)
 	}
 	if e := a.syncOrganization(ctx, u.OrgID); e == nil {

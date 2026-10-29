@@ -244,7 +244,7 @@ func probeDelay(failures int) time.Duration {
 	return d
 }
 func (a *App) probe(ctx context.Context, table, id string) (result error) {
-	if table != "organizations" && table != "projects" && table != "upstream_keys" {
+	if table != "organizations" && table != "upstream_projects" && table != "upstream_keys" {
 		return errors.New("invalid_scope")
 	}
 	var blocked, enabled bool
@@ -260,16 +260,16 @@ func (a *App) probe(ctx context.Context, table, id string) (result error) {
 			_, _ = a.DB.Exec(ctx, "UPDATE "+table+" SET probe_failures=probe_failures+1,next_probe_at=$2 WHERE id=$1", id, time.Now().Add(probeDelay(failures+1)))
 		}
 	}()
-	where := `k.enabled AND NOT k.invalid AND p.enabled AND o.enabled AND p.probe_model<>'' AND k.model_synced_at IS NOT NULL `
+	where := `k.enabled AND NOT k.invalid AND coalesce(p.enabled,true) AND o.enabled AND ` + probeModel + `<>'' AND k.model_synced_at IS NOT NULL `
 	switch table {
 	case "organizations":
 		where += `AND o.id=$1 `
-	case "projects":
+	case "upstream_projects":
 		where += `AND p.id=$1 AND NOT o.quota_blocked `
 	case "upstream_keys":
-		where += `AND k.id=$1 AND NOT o.quota_blocked AND NOT p.quota_blocked `
+		where += `AND k.id=$1 AND NOT o.quota_blocked AND NOT coalesce(p.quota_blocked,false) `
 	}
-	where += `AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=p.probe_model) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',p.probe_model) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id)))`
+	where += `AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=` + probeModel + `) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',` + probeModel + `) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id)))`
 	var u Upstream
 	if e := a.DB.QueryRow(ctx, selectUpstream+"WHERE "+where+" ORDER BY p.quota_blocked,k.quota_blocked,k.id LIMIT 1", id).Scan(&u.ID, &u.ProjectID, &u.OrgID, &u.Project, &u.Org, &u.Secret, &u.ProbeModel); e != nil {
 		return e
@@ -350,9 +350,10 @@ func (a *App) runCycle(ctx context.Context) {
 			cancel()
 		}
 	}
-	runIDs(`SELECT k.id FROM upstream_keys k JOIN projects p ON p.id=k.project_id JOIN organizations o ON o.id=p.org_id WHERE k.enabled AND NOT k.invalid AND p.enabled AND o.enabled AND (k.model_sync_attempted_at IS NULL OR k.model_sync_attempted_at<now()-interval '10 minutes')`, a.refreshModels)
+	runIDs(`SELECT k.id `+upstreamJoins+`WHERE k.enabled AND NOT k.invalid AND coalesce(p.enabled,true) AND o.enabled AND (k.model_sync_attempted_at IS NULL OR k.model_sync_attempted_at<now()-interval '10 minutes')`, a.refreshModels)
+	runIDs(`SELECT id FROM organizations WHERE enabled AND admin_secret IS NOT NULL AND (admin_checked_at IS NULL OR admin_checked_at<now()-interval '15 minutes')`, a.validateOrganization)
 	runIDs(`SELECT id FROM organizations WHERE enabled AND admin_secret IS NOT NULL AND (sync_attempted_at IS NULL OR sync_attempted_at<now()-interval '15 minutes')`, a.syncOrganization)
-	for _, table := range []string{"organizations", "projects", "upstream_keys"} {
+	for _, table := range []string{"organizations", "upstream_projects", "upstream_keys"} {
 		t := table
 		runIDs("SELECT id FROM "+t+" WHERE enabled AND quota_blocked AND next_probe_at<=now()", func(ctx context.Context, id string) error { return a.probe(ctx, t, id) })
 	}

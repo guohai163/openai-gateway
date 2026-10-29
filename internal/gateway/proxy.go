@@ -191,7 +191,7 @@ func (a *App) logAttempt(k GatewayKey, u Upstream, r *http.Request, status int, 
 	a.record(ctx, k, u, r.Method, r.URL.Path, status, code, start, usage, id, attempt, "inference")
 }
 func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
-	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id JOIN projects p ON p.id=k.project_id JOIN organizations o ON o.id=p.org_id WHERE `+available+` AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id))) ORDER BY m.model`)
+	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id JOIN organizations o ON o.id=k.org_id LEFT JOIN upstream_projects p ON p.org_id=k.org_id AND p.upstream_id=k.upstream_project_id WHERE `+available+` AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id))) ORDER BY m.model`)
 	if e != nil {
 		writeError(w, 503, "database_unavailable")
 		return

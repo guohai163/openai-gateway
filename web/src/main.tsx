@@ -71,7 +71,7 @@ function App() {
     [dashboard, setDashboard] = useState<Row>({}),
     [settings, setSettings] = useState<Row>({});
   const [orgs, setOrgs] = useState<Row[]>([]),
-    [projects, setProjects] = useState<Row[]>([]),
+    [upstreamProjects, setUpstreamProjects] = useState<Row[]>([]),
     [keys, setKeys] = useState<Row[]>([]),
     [models, setModels] = useState<Row[]>([]),
     [official, setOfficial] = useState<Row[]>([]);
@@ -115,12 +115,12 @@ function App() {
     setError("");
     try {
       const [o, p, k, m] = await Promise.all(
-        ["organizations", "projects", "upstream_keys", "models"].map((p) =>
-          api(p + "?limit=500"),
+        ["organizations", "upstream_projects", "upstream_keys", "models"].map(
+          (p) => api(p + "?limit=500"),
         ),
       );
       setOrgs(o.data);
-      setProjects(p.data);
+      setUpstreamProjects(p.data);
       setKeys(k.data);
       setModels(m.data);
       if (page === "overview") setDashboard(await api("dashboard"));
@@ -359,21 +359,37 @@ function App() {
     "gateway_keys",
   ].includes(page);
   const status = (r: Row) =>
-    !r.enabled || r.project_enabled === false || r.org_enabled === false
+    !r.enabled ||
+    r.upstream_project_enabled === false ||
+    r.org_enabled === false
       ? "disabled"
       : r.invalid
         ? "invalid"
-        : r.quota_blocked || r.project_quota_blocked || r.org_quota_blocked
+        : r.quota_blocked ||
+            r.upstream_project_quota_blocked ||
+            r.org_quota_blocked
           ? "blocked"
           : page === "upstream_keys" && !r.model_synced_at
             ? "pending"
             : "active";
   const columns: Record<string, string[]> = {
-    organizations: ["name", "status", "synced_at", "sync_error"],
-    projects: ["name", "org_name", "probe_model", "status", "next_probe_at"],
+    organizations: [
+      "name",
+      "admin_status",
+      "admin_checked_at",
+      "projects_access",
+      "costs_access",
+      "status",
+      "probe_model",
+      "next_probe_at",
+      "synced_at",
+      "sync_error",
+    ],
+    projects: ["name", "description", "status", "created_at"],
     upstream_keys: [
       "name",
-      "project_name",
+      "org_name",
+      "upstream_project_id",
       "models",
       "status",
       "model_synced_at",
@@ -412,6 +428,26 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "admin_status") {
+      return (
+        <span
+          className={
+            "badge " +
+            (v === "valid"
+              ? "active"
+              : v === "unchecked"
+                ? "pending"
+                : "invalid")
+          }
+        >
+          <i />
+          {t("admin_" + v)}
+        </span>
+      );
+    }
+    if (c === "projects_access" || c === "costs_access") {
+      return t("access_" + v);
+    }
     if (c === "status")
       return page === "logs" ? (
         <span className={`http-status ${v < 400 ? "success" : "failed"}`}>
@@ -430,6 +466,7 @@ function App() {
         "model_synced_at",
         "synced_at",
         "next_probe_at",
+        "admin_checked_at",
       ].includes(c)
     )
       return c === "expires_at" && !v ? t("never") : date(v);
@@ -446,7 +483,7 @@ function App() {
     if (c === "duration_ms") return number(v) + " ms";
     if (["input_tokens", "output_tokens", "num_requests", "amount"].includes(c))
       return number(v);
-    if (c === "sync_error") return v ? t(v) : "—";
+    if (c === "sync_error" || c === "admin_error") return v ? t(v) : "—";
     if (c === "kind") return t(v === "probe" ? "probeKind" : v);
     if (c === "name")
       return (
@@ -560,7 +597,9 @@ function App() {
                       ? "statsHint"
                       : page === "settings"
                         ? "settingsHint"
-                        : "subtitle",
+                        : page === "projects"
+                          ? "projectPoolHint"
+                          : "subtitle",
                 )}
               </p>
             </div>
@@ -768,8 +807,8 @@ function App() {
                         setOffset(0);
                       }}
                     >
-                      <option value="">{t("allProjects")}</option>
-                      {projects
+                      <option value="">{t("allUpstreamProjects")}</option>
+                      {upstreamProjects
                         .filter((p) => !org || p.org_id === org)
                         .map((p) => (
                           <option key={p.id} value={p.upstream_id}>
@@ -789,9 +828,8 @@ function App() {
                         .filter(
                           (k) =>
                             k.upstream_api_key_id &&
-                            (!project ||
-                              projects.find((p) => p.id === k.project_id)
-                                ?.upstream_id === project),
+                            (!org || k.org_id === org) &&
+                            (!project || k.upstream_project_id === project),
                         )
                         .map((k) => (
                           <option key={k.id} value={k.upstream_api_key_id}>
@@ -862,12 +900,20 @@ function App() {
                                   </>
                                 )}
                                 {page === "organizations" && (
-                                  <button
-                                    disabled={busy || !r.has_admin_key}
-                                    onClick={() => action(r.id, "sync")}
-                                  >
-                                    {t("sync")}
-                                  </button>
+                                  <>
+                                    <button
+                                      disabled={busy || !r.has_admin_key}
+                                      onClick={() => action(r.id, "verify")}
+                                    >
+                                      {t("verifyAdmin")}
+                                    </button>
+                                    <button
+                                      disabled={busy || !r.has_admin_key}
+                                      onClick={() => action(r.id, "sync")}
+                                    >
+                                      {t("sync")}
+                                    </button>
+                                  </>
                                 )}
                                 {r.quota_blocked && (
                                   <button
@@ -881,6 +927,11 @@ function App() {
                               {r.model_sync_error && (
                                 <small className="error-hint">
                                   {t(r.model_sync_error)}
+                                </small>
+                              )}
+                              {r.admin_error && (
+                                <small className="error-hint">
+                                  {t(r.admin_error)}
                                 </small>
                               )}
                               {r.last_error && (
@@ -962,27 +1013,25 @@ function App() {
                 {page === "organizations" && (
                   <>
                     {!modal.id && field("upstream_id", "text", "", true)}
-                    {field("admin_key", "password", "adminHint")}
+                    {field("admin_key", "password", "adminHint", !modal.id)}
+                    {field("probe_model", "text", "probeHint")}
                   </>
                 )}
                 {page === "projects" && (
-                  <>
-                    {!modal.id && (
-                      <>
-                        {select("org_id", orgs)}
-                        {field("upstream_id", "text", "", true)}
-                      </>
-                    )}
-                    {field("probe_model", "text", "probeHint", true)}
-                  </>
+                  <>{field("description", "text", "projectPoolHint")}</>
                 )}
                 {page === "upstream_keys" && (
                   <>
                     {!modal.id && (
                       <>
-                        {select("project_id", projects)}
+                        {select("org_id", orgs)}
                         {field("key", "password", "upstreamHint", true)}
                       </>
+                    )}
+                    {field(
+                      "upstream_project_id",
+                      "text",
+                      "upstreamProjectHint",
                     )}
                     <label>
                       {t("upstream_api_key_id")}
@@ -1007,16 +1056,16 @@ function App() {
                       onClick={async (e) => {
                         const form = e.currentTarget.closest("form")!;
                         const pid =
-                          modal.project_id ||
-                          new FormData(form).get("project_id");
+                          modal.org_id || new FormData(form).get("org_id");
                         if (!pid) {
-                          setError("project_fields_required");
+                          setError("upstream_key_required");
                           return;
                         }
                         setBusy(true);
                         try {
                           setOfficial(
-                            (await api(`projects/${pid}/official_keys`)).data,
+                            (await api(`organizations/${pid}/official_keys`))
+                              .data,
                           );
                         } catch (e) {
                           fail(e);
@@ -1042,11 +1091,19 @@ function App() {
                                     "upstream_api_key_id",
                                   ) as HTMLInputElement
                               ).value = k.id;
+                              const form = e.currentTarget.closest("form")!;
+                              (
+                                form.elements.namedItem(
+                                  "upstream_project_id",
+                                ) as HTMLInputElement
+                              ).value = k.upstream_project_id || "";
                             }}
                           >
                             {k.name}
                             <code>{k.id}</code>
-                            <small>{k.redacted_value}</small>
+                            <small>
+                              {k.redacted_value} · {k.upstream_project_name}
+                            </small>
                           </button>
                         ))}
                       </div>

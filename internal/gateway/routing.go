@@ -15,8 +15,10 @@ type Upstream struct {
 	Secret                                                []byte
 }
 
-const selectUpstream = `SELECT k.id,k.project_id,p.org_id,p.upstream_id,o.upstream_id,k.secret,p.probe_model FROM upstream_keys k JOIN projects p ON p.id=k.project_id JOIN organizations o ON o.id=p.org_id `
-const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND p.enabled AND NOT p.quota_blocked AND o.enabled AND NOT o.quota_blocked AND k.model_synced_at IS NOT NULL`
+const upstreamJoins = `FROM upstream_keys k JOIN organizations o ON o.id=k.org_id LEFT JOIN upstream_projects p ON p.org_id=k.org_id AND p.upstream_id=k.upstream_project_id `
+const probeModel = `coalesce(nullif(k.probe_model,''),o.probe_model)`
+const selectUpstream = `SELECT k.id,coalesce(p.id,''),k.org_id,k.upstream_project_id,o.upstream_id,k.secret,` + probeModel + ` ` + upstreamJoins
+const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND (p.id IS NULL OR (p.enabled AND NOT p.quota_blocked)) AND o.enabled AND NOT o.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
 	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND ((c.scope='organization' AND c.scope_id=o.id) OR (c.scope='project' AND c.scope_id=p.id) OR (c.scope='key' AND c.scope_id=k.id))) ORDER BY k.id`, model, pin)
@@ -57,7 +59,9 @@ func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, 
 	}
 	req.Header.Set("Authorization", "Bearer "+secret)
 	req.Header.Set("OpenAI-Organization", u.Org)
-	req.Header.Set("OpenAI-Project", u.Project)
+	if u.Project != "" {
+		req.Header.Set("OpenAI-Project", u.Project)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "identity")
 	return req, nil
@@ -100,6 +104,9 @@ func (a *App) classify(ctx context.Context, u Upstream, status int, code string,
 		scope, id, quota = "organization", u.OrgID, true
 	case "project_spend_limit_exceeded":
 		scope, id, quota = "project", u.ProjectID, true
+		if id == "" {
+			scope, id = "key", u.ID
+		}
 	case "insufficient_quota":
 		scope, id, quota = "key", u.ID, true
 	case "invalid_api_key", "invalid_authentication":
@@ -115,7 +122,7 @@ func (a *App) classify(ctx context.Context, u Upstream, status int, code string,
 		return e == nil
 	}
 	if quota {
-		table := map[string]string{"organization": "organizations", "project": "projects", "key": "upstream_keys"}[scope]
+		table := map[string]string{"organization": "organizations", "project": "upstream_projects", "key": "upstream_keys"}[scope]
 		_, e := a.DB.Exec(ctx, "UPDATE "+table+" SET quota_blocked=true,last_error=$2,next_probe_at=COALESCE(next_probe_at,now()+interval '5 minutes') WHERE id=$1", id, code)
 		return e == nil
 	}

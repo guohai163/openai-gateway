@@ -8,7 +8,8 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 ## 功能
 
-- 多组织、多项目、多 Key；按可用模型轮询，明确拒绝时最多尝试 3 个不同 Key。
+- 上游组织保存 Admin Key，上游普通 Key 直接绑定组织；网关项目独立管理，共享全部可用上游额度池。
+- 导入 Admin Key 后自动验证项目列表和费用读取权限，支持手动重新检查。按可用模型轮询，明确拒绝时最多尝试 3 个不同 Key。
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销。`*` 表示所有当前可用模型。
 - Chat Completions、Embeddings、Responses 和 SSE；Responses 资源归属及多轮上下文持久化绑定。
 - 区分组织额度、项目额度、旧版 Key 额度错误和限流；定时小额探测自动恢复。
@@ -101,11 +102,14 @@ docker compose down
 
 ### 初始配置顺序
 
-1. 添加上游组织，填写 OpenAI 组织 ID 和用于读取统计的 Admin Key。没有管理凭据仍可使用推理，但官方费用不可用。
-2. 为组织添加项目，填写 OpenAI 项目 ID 和支持 Responses 的恢复探测模型。
-3. 添加上游普通 Key。首次模型同步成功后参与调度。若需要单 Key 官方费用，在编辑界面读取并关联官方 Key ID；请核对名称及脱敏值。
-4. 颁发私有 Key，设置非空 IP 白名单、模型列表及可选有效期。明文只展示一次。
-5. 将客户端 `base_url` 改为 `https://你的域名/v1`，使用新私有 Key。
+1. 添加上游组织，填写名称、OpenAI 组织 ID 和 Admin Key。保存后会自动调用官方项目列表、费用接口验证，展示“Admin Key 状态”“项目列表权限”“费用查询权限”和检查时间；也可点击“检查 Admin Key”重新验证。
+2. 直接向组织添加上游普通 Key，无须先建网关项目。系统查询模型列表，成功后加入共享调度池。需要单 Key 官方费用时，使用组织的“读取官方密钥列表”功能关联官方 Key ID。
+3. OpenAI 项目 ID 是密钥自身上游归属的可选元数据，可以留空，由 OpenAI 按该密钥默认范围处理；关联官方 Key 时会一并填入。它用于正确转发上游请求头、查询官方费用和处理 OpenAI 项目额度，**不绑定网关业务项目**。
+4. 在组织中设置支持 Responses 的恢复探测模型；暂时留空时正常推理不受影响，但额度阻断后的自动探测需要先配置该模型。
+5. 颁发私有 Key，设置非空 IP 白名单、模型列表及可选有效期。明文只展示一次；客户端 `base_url` 使用 `https://你的域名/v1`。
+6. 如有需要，可独立创建网关项目，仅填写名称、说明和启停状态。网关项目不归属任何上游组织，也不绑定任何上游或私有 Key；不作为密钥池的路由限制，所有项目均可使用共享池的可用额度。
+
+Admin Key 校验只发送不收费的管理查询，分别显示“有效”“凭据无效”“权限不足”或“检查失败”。项目列表可读但费用权限不足时，凭据仍标记有效，并单独提示费用权限问题；管理凭据异常不会误停有效的普通推理 Key。准确预付费余额仍显示“未知”，已发生费用在“用量与费用”查看，不把费用当作剩余余额。
 
 ```sh
 curl https://ai.example.com/v1/models \
@@ -139,20 +143,20 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 管理 API 位于 `/admin/api`，先 `POST /login` 获取会话 Cookie 和 `csrf`，非 GET 操作携带 `X-CSRF-Token`。后台使用这些相同接口：
 
 - `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
-- `GET, POST /organizations|projects|upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。组织/项目归属及上游密钥不可修改，需要创建新资源进行轮换。
-- `POST /organizations/{id}/sync`、`POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /organizations|projects|upstream_keys/{id}/probe`。
-- `GET /projects/{id}/official_keys` 读取脱敏的官方 Key 列表。
+- `GET, POST /organizations|projects|upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游 Key 的组织归属及密钥明文不可修改，需要创建新资源进行轮换。网关项目仅接受名称、说明和启停字段，不接受密钥或组织绑定。
+- `POST /organizations/{id}/verify`、`POST /organizations/{id}/sync`、`POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /organizations|upstream_keys/{id}/probe`。
+- `GET /organizations/{id}/official_keys` 分页读取该组织各 OpenAI 项目的脱敏 Key 列表；`GET /upstream_projects` 读取自动发现的 OpenAI 元数据。
 - `GET /logs|audit|costs`；列表支持 `limit`（1–500）、`offset`；费用还支持 `org_id`（网关组织 ID）、`project_id`（OpenAI 项目 ID）、`api_key_id`（OpenAI 密钥 ID）。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。
 
 ## 调度、额度与统计
 
-- 独立请求按模型轮询所有符合条件的 Key。相同项目/组织中的 Key 共享上游配额及限流，不会增加上游实际容量。
+- 独立请求按模型轮询所有符合条件的 Key。相同 OpenAI 项目/组织中的 Key 共享上游配额及限流，不会增加上游实际容量。
 - 首次模型同步失败的 Key 不参与调度，后续同步失败保留旧列表。正常每 10 分钟同步，可手动刷新。
 - 仅上游明确拒绝的认证、额度、限流及模型不存在错误可触发候选切换。网络超时、5xx 或流已开始均不自动重放，避免重复执行或收费。
-- `credit_balance_exhausted`、组织支出/用量限制阻断组织；`project_spend_limit_exceeded` 阻断项目；范围不明的 `insufficient_quota` 仅阻断 Key。非额度错误不会清空模型或伪造余额。未提供明确作用范围的限流保守按组织 + 模型冷却，遵守 `Retry-After`。
-- 探测按受阻范围合并，一次使用一个有效 Key；失败后间隔为 5、10、20、40、60 分钟并封顶。探测模型必须支持 Responses，并限制 `max_output_tokens=64`、`store=false`。探测会产生少量费用，记录为“恢复探测”。手动停用和凭据无效不自动恢复；额度阻断可在后台主动探测。
+- `credit_balance_exhausted`、组织支出/用量限制阻断组织；`project_spend_limit_exceeded` 在已知 OpenAI 项目时阻断该上游项目，归属未知时仅阻断出错 Key；范围不明的 `insufficient_quota` 仅阻断 Key。非额度错误不会清空模型或伪造余额。未提供明确作用范围的限流保守按组织 + 模型冷却，遵守 `Retry-After`。
+- 探测按受阻范围合并，一次使用一个有效 Key；失败后间隔为 5、10、20、40、60 分钟并封顶。探测模型由组织配置，必须支持 Responses，并限制 `max_output_tokens=64`、`store=false`。探测会产生少量费用，记录为“恢复探测”。手动停用和凭据无效不自动恢复；额度阻断可在后台主动探测。
 - 每 15 分钟同步组织当月及至少最近 7 天的官方用量与费用，完整分页后事务更新。费用支持 Key 维度时按官方结果展示；上游不支持时退回项目维度，不推算单 Key 费用。较早历史不会回填。
 - 官方费用与网关日志为两套独立数据：上游统计可包含绕过本网关的调用，且可能延迟。私有 Key 仅统计本网关实际返回的 usage；流式接口缺少终态 usage 时不估算。Response 轮询及重复流按 Response ID 去重。
 - **余额显示“未知”**。官方费用不是实时预付费余额；未使用旧版未公开 billing 接口，不根据累计费用猜测余额。
@@ -231,6 +235,12 @@ TEST_DATABASE_URL='postgresql://user:password@localhost:5432/testdb?sslmode=disa
 ```
 
 集成测试不调用 OpenAI，使用本地模拟 HTTP 上游。未设置 `TEST_DATABASE_URL` 时跳过数据库集成测试。生产入口不允许通过环境变量改写上游地址。
+
+## 已部署旧版本的升级
+
+本版本启动时自动执行 `003_organization_key_pool.sql`：将上游 Key 的组织归属迁移为直接关系，保留已有密钥密文、模型、私有 Key、调用记录和 Responses 归属；旧 OpenAI 项目数据保存在独立的 `upstream_projects` 元数据表，同时保留原项目名称为独立网关项目。
+
+升级前先备份数据库和原 `MASTER_KEY`，然后执行 `docker compose pull gateway && docker compose up -d gateway`。不需要删除数据卷，也不需要重新导入已有 Key。旧的 `/projects/{id}/official_keys` 管理接口改为 `/organizations/{id}/official_keys`，新建上游 Key 使用 `org_id`，不再接受网关 `project_id`。
 
 ## 备份与恢复
 
