@@ -1,0 +1,6 @@
+# Local source build: docker compose -f docker-compose.yaml -f compose.build.yaml up -d --build
+services:
+  gateway:
+    image: openai-gateway:local
+    build:
+      context: .

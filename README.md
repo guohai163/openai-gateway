@@ -1,0 +1,249 @@
+# 光宇 AI 网关 / Guangyu AI Gateway
+
+[![CI & Container Image](https://github.com/guohai163/openai-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/guohai163/openai-gateway/actions/workflows/ci.yml)
+
+源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
+
+Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触光宇私有 Key。
+
+## 功能
+
+- 多组织、多项目、多 Key；按可用模型轮询，明确拒绝时最多尝试 3 个不同 Key。
+- 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销。`*` 表示所有当前可用模型。
+- Chat Completions、Embeddings、Responses 和 SSE；Responses 资源归属及多轮上下文持久化绑定。
+- 区分组织额度、项目额度、旧版 Key 额度错误和限流；定时小额探测自动恢复。
+- Admin Key 查询官方 Token 用量和费用，支持分页、幂等同步与组织/项目/密钥筛选。
+- AES-256-GCM 加密上游凭据；私有 Key 保存 SHA-256 哈希；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
+- 中英文自动识别、手动切换并记住选择；只记录调用元数据，不保存对话正文。
+
+## 使用 CI 镜像运行（推荐）
+
+服务器只需要 Docker Engine 和 Docker Compose v2，无须安装 Go 或 Node.js。镜像支持 Linux AMD64 和 ARM64。
+
+### 1. 下载配置并生成部署密钥
+
+```sh
+git clone https://github.com/guohai163/openai-gateway.git
+cd openai-gateway
+cp .env.example .env
+openssl rand -hex 24      # 将结果填入 .env 的 POSTGRES_PASSWORD
+openssl rand -base64 32   # 将结果填入 .env 的 MASTER_KEY
+openssl rand -hex 24      # 将结果填入 .env 的 ADMIN_PASSWORD
+```
+
+编辑 `.env`，替换所有 `replace-with-...` 示例值。`POSTGRES_PASSWORD` 使用上述十六进制字符串，避免数据库连接 URL 转义问题。`.env` 不会被提交或打包到镜像中。
+
+| 变量 | 说明 |
+| --- | --- |
+| `GATEWAY_IMAGE` | 默认 `ghcr.io/guohai163/openai-gateway:latest`，也可指定版本或 SHA 标签 |
+| `POSTGRES_PASSWORD` | PostgreSQL 密码；第一次初始化后保持不变 |
+| `MASTER_KEY` | `openssl rand -base64 32` 生成的加密主密钥；必须随数据库备份妥善保存 |
+| `ADMIN_USERNAME` | 管理员用户名，默认 `admin` |
+| `ADMIN_PASSWORD` | 首次初始化的管理员密码，至少 12 个字符 |
+| `COOKIE_SECURE` | HTTPS 正式部署设为 `true`；本地 HTTP 试用改为 `false` |
+| `BIND_ADDRESS` | 默认 `127.0.0.1`，只向本机暴露网关 8080 端口 |
+| `TRUSTED_PROXIES` | Go 服务实际看到的可信代理来源 CIDR，逗号分隔；无代理时留空 |
+| `REQUEST_TIMEOUT_SECONDS` | 上游调用总超时，默认 600 秒，包含流式调用 |
+
+### 2. 拉取并启动
+
+运行文件是仓库根目录的 [docker-compose.yaml](docker-compose.yaml)，Docker Compose 会自动识别这个标准文件名。
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose ps
+curl --fail http://127.0.0.1:8080/healthz
+```
+
+健康检查返回 `{"status":"ok"}` 表示数据库和网关可用。本地试用时将 `COOKIE_SECURE=false`，通过 `http://127.0.0.1:8080` 登录管理后台，账号取自 `.env`。远程服务器可以用 SSH 转发在本机试用：
+
+```sh
+ssh -L 8080:127.0.0.1:8080 user@your-server
+```
+
+生产环境使用 [deploy/nginx.conf](deploy/nginx.conf) 配置域名、证书和 HTTPS 反向代理，并保持 `COOKIE_SECURE=true`。不要将数据库端口暴露到公网。
+
+如果拉取镜像时提示 `denied` 或 `unauthorized`，先在 GitHub 的包设置中确认该镜像的可见性。GHCR 首次发布的包可能是私有包：私有包需要在服务器用具有 `read:packages` 权限的 GitHub classic PAT 登录；公开包可以匿名拉取。
+
+```sh
+# 在终端环境中设置 GHCR_TOKEN，避免把实际令牌写入仓库或命令文本。
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u guohai163 --password-stdin
+docker compose pull
+docker compose up -d
+```
+
+参考：[GHCR 身份认证和包可见性](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
+`TRUSTED_PROXIES` 必须配置为 Go 服务实际看到的反向代理来源 CIDR；Docker 转发后可能是 Docker 网桥地址。仅添加精确代理地址，并确保 8080 不能被其他来源绕过代理访问。留空时忽略转发头，以 TCP 来源 IP 校验白名单。Nginx 示例覆盖客户端自带的 `X-Forwarded-For`；可信代理链从右向左解析，遇到首个非可信地址即停止。
+
+`ADMIN_USERNAME` / `ADMIN_PASSWORD` 只用于空数据库的首次初始化，不会在重启时覆盖已有账号。重启、更新镜像时必须保留原来的 `MASTER_KEY` 和数据库卷。
+
+### 3. 常用运行命令
+
+```sh
+# 查看状态和日志
+docker compose ps
+docker compose logs -f --tail=100 gateway
+
+# 更新到 .env 指定的镜像版本
+docker compose pull gateway
+docker compose up -d gateway
+
+# 重启服务
+docker compose restart gateway
+
+# 停止并移除容器，保留数据库卷
+docker compose down
+```
+
+数据库持久化在 `postgres_data` 命名卷中。`docker compose down -v` 会删除数据库数据，不用于日常停止服务。升级前先执行文末备份步骤。需要回滚时，将 `.env` 中 `GATEWAY_IMAGE` 改为之前验证过的 SHA 或版本标签，再拉取、启动；涉及数据库变更时使用对应备份恢复。
+
+### 初始配置顺序
+
+1. 添加上游组织，填写 OpenAI 组织 ID 和用于读取统计的 Admin Key。没有管理凭据仍可使用推理，但官方费用不可用。
+2. 为组织添加项目，填写 OpenAI 项目 ID 和支持 Responses 的恢复探测模型。
+3. 添加上游普通 Key。首次模型同步成功后参与调度。若需要单 Key 官方费用，在编辑界面读取并关联官方 Key ID；请核对名称及脱敏值。
+4. 颁发私有 Key，设置非空 IP 白名单、模型列表及可选有效期。明文只展示一次。
+5. 将客户端 `base_url` 改为 `https://你的域名/v1`，使用新私有 Key。
+
+```sh
+curl https://ai.example.com/v1/models \
+  -H "Authorization: Bearer $GYAI_KEY"
+
+curl https://ai.example.com/v1/responses \
+  -H "Authorization: Bearer $GYAI_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"你的可用模型ID","input":"你好","stream":true}'
+```
+
+不要将上游普通 Key 或 Admin Key 发给客户端。调用者自带的组织/项目认证头不会传给上游。
+
+## API
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /v1/models` | 私有权限与当前可调度模型交集 |
+| `POST /v1/chat/completions` | JSON / SSE |
+| `POST /v1/embeddings` | JSON |
+| `POST /v1/responses` | JSON / SSE，支持 `previous_response_id` |
+| `GET, DELETE /v1/responses/{id}` | 绑定原上游并校验私有 Key 归属 |
+| `POST /v1/responses/{id}/cancel` | 取消后台响应 |
+| `GET /v1/responses/{id}/input_items` | 查询输入项，支持分页查询参数 |
+| `GET /healthz` | 数据库健康检查 |
+
+请求体上限 32 MiB；单 SSE 事件上限 8 MiB。客户端断开会取消上游请求。代理不会解析并重写模型输出；仅旁读 ID、usage 和结构化错误。为保持最小权限，不开放 Files、Batch、Conversations 管理或 WebSocket。
+
+Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操作绑定原上游，禁用、额度不足或模型不可用时返回 `503 no_available_upstream`，不会切换账户。只接受本网关生成并登记的 ID。保留上游 `store` 默认行为；使用 `store=false` 时上游可能不支持后续查询或续接，网关不会额外保存上下文。
+
+管理 API 位于 `/admin/api`，先 `POST /login` 获取会话 Cookie 和 `csrf`，非 GET 操作携带 `X-CSRF-Token`。后台使用这些相同接口：
+
+- `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
+- `GET, POST /organizations|projects|upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。组织/项目归属及上游密钥不可修改，需要创建新资源进行轮换。
+- `POST /organizations/{id}/sync`、`POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /organizations|projects|upstream_keys/{id}/probe`。
+- `GET /projects/{id}/official_keys` 读取脱敏的官方 Key 列表。
+- `GET /logs|audit|costs`；列表支持 `limit`（1–500）、`offset`；费用还支持 `org_id`（网关组织 ID）、`project_id`（OpenAI 项目 ID）、`api_key_id`（OpenAI 密钥 ID）。
+
+网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。
+
+## 调度、额度与统计
+
+- 独立请求按模型轮询所有符合条件的 Key。相同项目/组织中的 Key 共享上游配额及限流，不会增加上游实际容量。
+- 首次模型同步失败的 Key 不参与调度，后续同步失败保留旧列表。正常每 10 分钟同步，可手动刷新。
+- 仅上游明确拒绝的认证、额度、限流及模型不存在错误可触发候选切换。网络超时、5xx 或流已开始均不自动重放，避免重复执行或收费。
+- `credit_balance_exhausted`、组织支出/用量限制阻断组织；`project_spend_limit_exceeded` 阻断项目；范围不明的 `insufficient_quota` 仅阻断 Key。非额度错误不会清空模型或伪造余额。未提供明确作用范围的限流保守按组织 + 模型冷却，遵守 `Retry-After`。
+- 探测按受阻范围合并，一次使用一个有效 Key；失败后间隔为 5、10、20、40、60 分钟并封顶。探测模型必须支持 Responses，并限制 `max_output_tokens=64`、`store=false`。探测会产生少量费用，记录为“恢复探测”。手动停用和凭据无效不自动恢复；额度阻断可在后台主动探测。
+- 每 15 分钟同步组织当月及至少最近 7 天的官方用量与费用，完整分页后事务更新。费用支持 Key 维度时按官方结果展示；上游不支持时退回项目维度，不推算单 Key 费用。较早历史不会回填。
+- 官方费用与网关日志为两套独立数据：上游统计可包含绕过本网关的调用，且可能延迟。私有 Key 仅统计本网关实际返回的 usage；流式接口缺少终态 usage 时不估算。Response 轮询及重复流按 Response ID 去重。
+- **余额显示“未知”**。官方费用不是实时预付费余额；未使用旧版未公开 billing 接口，不根据累计费用猜测余额。
+
+官方参考：[模型列表](https://developers.openai.com/api/reference/resources/models/methods/list)、[Admin API](https://developers.openai.com/api/docs/guides/admin-apis)、[费用](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs)、[错误码](https://developers.openai.com/api/docs/guides/error-codes)。
+
+## GitHub Actions 自动构建镜像
+
+工作流位于 [.github/workflows/ci.yml](.github/workflows/ci.yml)，在 GitHub 的 [Actions 页面](https://github.com/guohai163/openai-gateway/actions/workflows/ci.yml) 查看日志、发布标签和镜像摘要。
+
+1. PR、`main` 分支提交、`v*` 标签及手动触发都会执行前端测试与构建、PostgreSQL 集成与竞态测试、Go 静态分析、两种 Compose 配置校验和 Docker 镜像启动检查。
+2. 检查通过后，`main` 分支和 `v*` 标签会构建 `linux/amd64`、`linux/arm64` 镜像，并推送到 GHCR；PR 只验证，不发布镜像。
+3. 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，镜像发布任务具有 `packages: write`，不需要配置 Docker Hub 账号或另存发布令牌。
+
+| 触发来源 | 镜像标签示例 |
+| --- | --- |
+| `main` 分支 | `latest`、`sha-<完整提交SHA>` |
+| `v1.2.3` 标签 | `v1.2.3`、`1.2.3`、`1.2`、`sha-<完整提交SHA>` |
+| Actions 手动执行（选择 `main`） | `latest`、`sha-<完整提交SHA>` |
+
+`latest` 跟随通过检查的 `main` 分支。正式部署可以将 `GATEWAY_IMAGE` 固定为某个版本、`sha-...` 标签或 `ghcr.io/guohai163/openai-gateway@sha256:...` 摘要。首次构建需要等待 Actions 成功后再拉取。
+
+发布新版本的示例（用实际版本号替换）：
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+镜像关联到本仓库。若首次发布被 GitHub 的 Actions 或 Packages 策略限制，请在仓库设置中允许该工作流运行及写入包；具体失败原因见 Actions 日志。镜像首次发布后的可见性由 GHCR 包设置管理，工作流不会自动更改公开范围。
+
+## 从源码构建 Docker 镜像
+
+本地开发或不使用 GHCR 时，通过 [compose.build.yaml](compose.build.yaml) 覆盖网关镜像为 `openai-gateway:local` 并增加构建配置，PostgreSQL、环境变量和数据卷与默认部署保持一致：
+
+```sh
+# 先按前文准备 .env
+docker compose -f docker-compose.yaml -f compose.build.yaml up -d --build
+docker compose -f docker-compose.yaml -f compose.build.yaml logs -f gateway
+
+# 后续本地更新仍使用相同的两个配置文件
+docker compose -f docker-compose.yaml -f compose.build.yaml up -d --build gateway
+```
+
+单独构建镜像：
+
+```sh
+docker build -t openai-gateway:local .
+```
+
+## 开发与测试
+
+需要 Go 1.26+、Node 24+、PostgreSQL 17+。
+
+```sh
+cd web
+npm ci
+npm test
+npm run build
+cd ..
+export DATABASE_URL='postgresql://user:password@localhost:5432/gyai?sslmode=disable'
+export MASTER_KEY="$(openssl rand -base64 32)"
+export ADMIN_PASSWORD='replace-with-a-unique-long-password'
+export COOKIE_SECURE=false
+go run ./cmd/gateway
+```
+
+开发热更新可另开终端执行 `cd web && npm run dev`，Vite 会代理管理 API 到本地 8080。后端必须先构建 `web/dist`，以嵌入前端资源。
+
+```sh
+go test -race ./...
+go vet ./...
+# 使用隔离数据库；测试会自动创建并清理独立 schema，需要 CREATE 权限。
+TEST_DATABASE_URL='postgresql://user:password@localhost:5432/testdb?sslmode=disable' \
+  go test -race -count=1 ./internal/gateway/...
+```
+
+集成测试不调用 OpenAI，使用本地模拟 HTTP 上游。未设置 `TEST_DATABASE_URL` 时跳过数据库集成测试。生产入口不允许通过环境变量改写上游地址。
+
+## 备份与恢复
+
+数据库卷保存配置、密钥密文、会话、响应归属、日志与统计。必须同时保管 `MASTER_KEY`；丢失后无法解密上游凭据。
+
+```sh
+docker compose exec -T postgres pg_dump -U gyai -d gyai -Fc > gyai.dump
+# 在新建空数据库中恢复，恢复时先停止网关。
+docker compose stop gateway
+cat gyai.dump | docker compose exec -T postgres pg_restore -U gyai -d gyai --clean --if-exists
+docker compose up -d gateway
+```
+
+迁移在启动时执行，使用版本表和数据库锁，升级前备份。日志和响应归属首版不自动删除，请按容量规划保留时间；删除归属记录会使对应响应无法续接。会话和过期冷却记录自动清理。
+
+首版运行一个 Go 实例。轮询游标与登录限速在进程内；状态、额度、探测计划和会话在 PostgreSQL。需要多副本时应先增加共享调度、探测锁和分布式登录限速。
