@@ -224,12 +224,22 @@ small {
 .wordmark small {
   display: none;
 }
+.boot img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
 .logo {
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
   color: var(--text);
+}
+.logo img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
 }
 .brand-button {
   background: none;

@@ -21,7 +21,6 @@ import {
   Search,
   Settings,
   ShieldCheck,
-  SquareTerminal,
   Sun,
   Terminal,
   X,
@@ -341,7 +340,7 @@ function App() {
   const mark = (
     <span className="wordmark">
       <span className="logo">
-        <SquareTerminal size={21} />
+        <img src="/gyai-icon.png" alt="" />
       </span>
       <span>
         {t("brand")}
@@ -352,7 +351,7 @@ function App() {
   if (session === undefined)
     return (
       <div className="boot">
-        <SquareTerminal />
+        <img src="/gyai-icon.png" alt="" />
         {t("loading")}
       </div>
     );

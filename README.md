@@ -4,6 +4,8 @@
 
 源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
 
+![AI Gateway project icon](web/public/gyai-icon.png)
+
 最新版本：[v1.4.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.2`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
