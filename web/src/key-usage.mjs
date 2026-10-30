@@ -1,4 +1,4 @@
-export const exampleModel = "gpt-6.1-lune";
+export const exampleModel = "gpt-6-luna";
 
 function shellQuote(value) {
   return "'" + String(value).replaceAll("'", "'\\''") + "'";

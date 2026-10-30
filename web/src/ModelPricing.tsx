@@ -91,6 +91,61 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
           timeStyle: "short",
         }).format(new Date(v))
       : "—";
+  function priceLines(
+    row: Row,
+    field: "input_price" | "output_price" | "cached_input_price",
+  ) {
+    const modalities = row.modality_prices || {};
+    const names = ["text", "image"].filter((name) => modalities[name]);
+    if (names.length)
+      return (
+        <div className="price-rate-stack">
+          {names.map((name) => (
+            <div className="price-rate-entry" key={name}>
+              <small>
+                {t(name === "image" ? "imageTokens" : "textTokens")}
+              </small>
+              <strong>
+                {field === "output_price" && !modalities[name].output_applicable
+                  ? t("notApplicable")
+                  : money(modalities[name][field])}
+              </strong>
+            </div>
+          ))}
+        </div>
+      );
+    const tiered = row.long_context_policy === "tiered";
+    return (
+      <div className="price-rate-stack">
+        <div className="price-rate-entry">
+          <small>
+            {tiered
+              ? t("shortContextUpTo").replace(
+                  "{tokens}",
+                  number(row.long_context_threshold),
+                )
+              : t("standardRate")}
+          </small>
+          <strong>
+            {field === "output_price" && !row.output_applicable
+              ? t("notApplicable")
+              : money(row[field])}
+          </strong>
+        </div>
+        {tiered && (
+          <div className="price-rate-entry price-rate-long">
+            <small>
+              {t("longContextFrom").replace(
+                "{tokens}",
+                number(row.long_context_threshold),
+              )}
+            </small>
+            <strong>{money(row["long_" + field])}</strong>
+          </div>
+        )}
+      </div>
+    );
+  }
   const rows = result.data as Row[];
   return (
     <div className="pricing-page">
@@ -190,24 +245,16 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
           </span>
         </div>
         <div className="table-scroll">
-          <table>
+          <table className="pricing-table">
             <thead>
               <tr>
-                {[
-                  "platform",
-                  "model",
-                  "pricingStatus",
-                  "inputPrice",
-                  "outputPrice",
-                  "cachedInputPrice",
-                  "longContextRule",
-                  "longInputPrice",
-                  "longOutputPrice",
-                  "inModelCatalog",
-                  "syncedPriceAt",
-                ].map((c) => (
-                  <th key={c}>{t(c)}</th>
-                ))}
+                {["model", "inputPrice", "outputPrice", "cachedInputPrice"].map(
+                  (column) => (
+                    <th key={column} scope="col">
+                      {t(column)}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
@@ -218,29 +265,58 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                     row.price_status !== "ready" ? "missing-price-row" : ""
                   }
                 >
-                  <td>{row.platform === "openai" ? "OpenAI" : row.platform}</td>
-                  <td>
-                    <code>{row.model}</code>
+                  <td className="pricing-model-cell">
+                    <div className="pricing-model-heading">
+                      <code>{row.model}</code>
+                      <span
+                        className={
+                          "badge " +
+                          (row.price_status === "ready" ? "active" : "invalid")
+                        }
+                      >
+                        <i />
+                        {t("price_" + row.price_status)}
+                      </span>
+                    </div>
+                    <div className="pricing-model-meta">
+                      <span>
+                        {row.platform === "openai" ? "OpenAI" : row.platform}
+                      </span>
+                      <span>
+                        {t("inModelCatalog")}:{" "}
+                        {t(row.in_catalog ? "yes" : "no")}
+                      </span>
+                    </div>
+                    <p className="pricing-context-rule">
+                      {Object.keys(row.modality_prices || {}).length
+                        ? t("imagePricingHint")
+                        : row.long_context_policy === "tiered"
+                          ? t(
+                              row.long_context_surcharge
+                                ? "longContextAbove"
+                                : "longContextUnchanged",
+                            ).replace(
+                              "{tokens}",
+                              number(row.long_context_threshold),
+                            )
+                          : t(
+                              row.long_context_policy === "none"
+                                ? "longContextNone"
+                                : "longContextUnknown",
+                            )}
+                    </p>
+                    <small className="pricing-model-date">
+                      {t("syncedPriceAt")}: {date(row.synced_at)}
+                    </small>
                   </td>
-                  <td>
-                    <span
-                      className={
-                        "badge " +
-                        (row.price_status === "ready" ? "active" : "invalid")
-                      }
-                    >
-                      <i />
-                      {t("price_" + row.price_status)}
-                    </span>
+                  <td data-label={t("inputPrice")}>
+                    {priceLines(row, "input_price")}
                   </td>
-                  <td>{money(row.input_price)}</td>
-                  <td>
-                    {row.output_applicable
-                      ? money(row.output_price)
-                      : t("notApplicable")}
+                  <td data-label={t("outputPrice")}>
+                    {priceLines(row, "output_price")}
                   </td>
-                  <td>
-                    {money(row.cached_input_price)}
+                  <td data-label={t("cachedInputPrice")}>
+                    {priceLines(row, "cached_input_price")}
                     {row.cache_write_30m_price != null && (
                       <details className="price-write-details">
                         <summary>{t("cacheWrites")}</summary>
@@ -255,11 +331,11 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                         {row.long_context_policy === "tiered" && (
                           <>
                             <small>
-                              {t("longInputPrice")} · {t("cacheWrite30m")}:{" "}
+                              {t("longContextRate")} · {t("cacheWrite30m")}:{" "}
                               {money(row.long_cache_write_30m_price)}
                             </small>
                             <small>
-                              {t("longInputPrice")} · {t("cacheWrite12h")}:{" "}
+                              {t("longContextRate")} · {t("cacheWrite12h")}:{" "}
                               {money(row.long_cache_write_12h_price)}
                             </small>
                           </>
@@ -267,34 +343,6 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                       </details>
                     )}
                   </td>
-                  <td>
-                    {row.long_context_policy === "tiered"
-                      ? t(
-                          row.long_context_surcharge
-                            ? "longContextAbove"
-                            : "longContextUnchanged",
-                        ).replace(
-                          "{tokens}",
-                          number(row.long_context_threshold),
-                        )
-                      : t(
-                          row.long_context_policy === "none"
-                            ? "longContextNone"
-                            : "longContextUnknown",
-                        )}
-                  </td>
-                  <td>
-                    {row.long_context_policy === "none"
-                      ? "—"
-                      : money(row.long_input_price)}
-                  </td>
-                  <td>
-                    {row.long_context_policy === "none"
-                      ? "—"
-                      : money(row.long_output_price)}
-                  </td>
-                  <td>{t(row.in_catalog ? "yes" : "no")}</td>
-                  <td>{date(row.synced_at)}</td>
                 </tr>
               ))}
             </tbody>

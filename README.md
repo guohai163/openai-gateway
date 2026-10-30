@@ -4,7 +4,7 @@
 
 源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
 
-最新版本：[v1.4.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.0`。
+最新版本：[v1.4.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.1`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -129,7 +129,7 @@ docker compose down
 2. 如需额度恢复探测，在该上游 Key 中填写可用且支持 Responses 的探测模型。留空不影响正常推理，但不会发起恢复探测。
 3. 颁发私有 Key，名称仅支持小写字母、数字和连字符（`-`），最多 120 个字符；IP 白名单默认按当前请求者 IPv4 `/24` 或 IPv6 `/64` 自动填写，可手动修改。从全部已同步上游 Key 的模型去重列表中搜索、多选，或选择全部模型。有效期仅支持 30、90、120 天，默认 30 天，从创建或续期时计算。新密钥统一以 `gk-ai-` 开头，管理员可在操作栏点击“显示密钥”再次查看或复制；客户端 `base_url` 使用 `https://你的域名/v1`。
 
-私有密钥操作栏和新密钥弹窗均提供“如何使用”，自动填入完整密钥和当前网关地址，生成发送 `hi` 的 curl 示例。密钥输入框支持显示、隐藏及复制；明文只存在当前弹层内存中，不写入浏览器持久存储。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
+私有密钥操作栏和新密钥弹窗均提供“如何使用”，自动填入完整密钥和当前网关地址，生成发送 `hi` 的 curl 示例。密钥输入框支持显示、隐藏及复制；明文只存在当前弹层内存中，不写入浏览器持久存储。默认示例模型为 `gpt-6-luna`，不可用时自动选择已授权且已同步的模型。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
 
 升级前只保存了哈希的旧私有 Key 无法从数据库还原。旧 Key 下次通过认证及 IP 白名单检查时，会自动补存 AES-GCM 加密副本；也可在“如何使用”中粘贴原密钥并点击“验证并保存原密钥”，服务器验证哈希匹配后保存。无需轮换密钥。无法获取原密钥且客户端也不再持有时，需要重新创建密钥。删除私有 Key 会同时清除加密副本。
 
@@ -180,19 +180,21 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 ## 模型定价
 
-管理菜单中的“模型定价”页面提供 OpenAI 官方价格的手动同步。点击“同步官方价格”后，服务端从 [官方价格页的 Markdown](https://developers.openai.com/api/docs/pricing.md) 读取 **Standard 文本 Token 和向量模型**价格，无须提供 Admin Key，也不会发送推理请求。
+管理菜单中的“模型定价”页面提供 OpenAI 官方价格的手动同步。点击“同步官方价格”后，服务端从 [官方价格页的 Markdown](https://developers.openai.com/api/docs/pricing.md) 读取 **Standard 文本、向量和图像 Token**价格，无须提供 Admin Key，也不会发送推理请求。
 
 - PostgreSQL 的 `model_pricing` 表以 `(platform, model)` 为联合主键，同名模型在不同平台的价格独立。当前同步器只支持 `openai`。
-- 金额使用 `NUMERIC(24,10)`，单位为 USD / 百万 Token。分别保存输入、输出、缓存输入，以及长上下文输入、输出和缓存输入单价；向量模型没有输出计费时显示“不适用”。
-- `long_context_policy` 区分无公开分档、已知分档和规则未知；`long_context_threshold` 保存实际输入 Token 阈值，`long_context_surcharge` 表示长上下文输入或输出单价是否更高。**200K 不是通用加价阈值**：若官方标注超过 272K 后加价，就保存并显示 272000。
+- 金额使用 `NUMERIC(24,10)`，单位为 USD / 百万 Token。图片模型在 `modality_prices` 中分别保存 `text` 和 `image` 的十进制单价，文本与图像费率互不替代，图片输出使用图像单价；非按张收费。分别保存输入、输出、缓存输入，以及长上下文输入、输出和缓存输入单价；向量模型没有输出计费时显示“不适用”。
+- `long_context_policy` 区分无公开分档、已知分档和规则未知；`long_context_threshold` 保存实际输入 Token 阈值，`long_context_surcharge` 表示长上下文输入或输出单价是否更高。**200K 不是通用加价阈值，KB 也不是计价单位**：若官方标注超过 272K 后加价，就保存并显示 272000 输入 Token；普通价和长上下文价在同一价格格显示，窄窗口无需横向滚动查找。
 - 上游 `/v1/models` 同步成功时自动建立尚未匹配价格的记录。价格按精确模型 ID 匹配，不用名称前缀推断快照模型的价格；缺失价格、当前来源未再匹配或上下文规则无法确认的记录标红，支持筛选查看。
 - 页面分别显示官方已公布价格和是否已在本机上游模型列表中发现。模型没有价格不会阻止正常转发，也不会被当作免费模型。
 - 同步以事务更新，平台互不覆盖。网络失败、页面结构不再识别或出现相互冲突的 Standard 价格时保留旧数据并显示错误；官方网页解析并非官方价格 API。
-- Batch、Flex、Fast、图像、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；不会对私有 Key 执行收费或扣减。官方公布的 30 分钟及 12 小时缓存写入单价会一并同步保存。
+- Batch、Flex、Fast、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；不会对私有 Key 执行收费或扣减。官方公布的 30 分钟及 12 小时缓存写入单价会一并同步保存。
 
 管理接口：`GET /admin/api/pricing?platform=openai&q=模型ID&missing=true&limit=100&offset=0`；`POST /admin/api/pricing/sync?platform=openai`。均需管理员会话，手动同步还需 CSRF Token；平台同步记录保存在 `model_pricing_sync` 表。
 
 本次迁移 `007_model_pricing.sql` 自动创建定价表并为已有模型建立待定价记录；网关项目管理接口和菜单已移除，旧项目资料归档为 `archived_gateway_projects`，上游请求完全使用密钥自身范围。历史迁移文件仍保留，保证从早期版本升级可重放迁移。升级保持原数据卷和 `MASTER_KEY`，无须重新导入密钥。
+
+图片模型分项价格由 `009_modality_prices.sql` 增加到现有定价表，更新后手动同步即可补全。`gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 的文本、图像 Token 价格分行显示，缺失分项仍标红。GPT Image 2 / 2.5 的图像缓存单价仅适用于通过 Responses API 生成的图片，详见[官方图片模型价格](https://developers.openai.com/api/docs/pricing#image-generation-models)。当前网关转发接口范围保持不变，图像生成的多模态用量不套用文本费用估算。
 
 ## 调用记录：费用与缓存
 

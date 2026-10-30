@@ -1621,6 +1621,104 @@ tbody tr:hover .actions-column {
   color: var(--danger);
   background: var(--danger-bg);
 }
+.pricing-table {
+  table-layout: fixed;
+}
+.pricing-table th:first-child {
+  width: 40%;
+}
+.pricing-table td {
+  max-width: none;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pricing-model-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.pricing-model-heading code {
+  font-size: 13px;
+  font-weight: 600;
+}
+.pricing-model-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.pricing-context-rule {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 9px;
+}
+.pricing-model-date {
+  display: block;
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 8px;
+}
+.price-rate-stack {
+  display: grid;
+  gap: 12px;
+}
+.price-rate-entry {
+  display: grid;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.price-rate-entry small {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.price-rate-entry strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.price-rate-long strong {
+  color: var(--warning);
+}
+@media (max-width: 1000px) {
+  .pricing-table,
+  .pricing-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .pricing-table thead {
+    display: none;
+  }
+  .pricing-table tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 1px solid var(--border);
+  }
+  .pricing-table tr:last-child {
+    border-bottom: 0;
+  }
+  .pricing-table td {
+    padding: 14px;
+    border: 0;
+    min-width: 0;
+  }
+  .pricing-table .pricing-model-cell {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+  .pricing-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+}
 .missing-price-text {
   color: var(--danger);
 }

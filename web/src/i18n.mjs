@@ -4,6 +4,14 @@ export function resolveLanguage(preference, languages = ["en"]) {
 }
 export const messages = {
   en: {
+    textTokens: "Text tokens",
+    imageTokens: "Image tokens",
+    standardRate: "Standard",
+    shortContextUpTo: "≤ {tokens} input tokens",
+    longContextFrom: "> {tokens} input tokens",
+    longContextRate: "Long context",
+    imagePricingHint:
+      "Text and image token rates are separate. Output uses image tokens.",
     costUnavailable: "Cost unavailable",
     cacheWriteIncluded: "Cache writes (included)",
     cacheWrite30m: "30-minute cache write",
@@ -42,10 +50,10 @@ export const messages = {
     usage_missing: "Upstream did not report complete usage.",
     pricing: "Model pricing",
     platform: "Platform",
-    pricingScope: "Standard text & embedding rates · USD / 1M tokens",
+    pricingScope: "Standard text, embedding & image rates · USD / 1M tokens",
     pricingDescription: "Official token prices by platform and exact model ID.",
     pricingThresholdHint:
-      "Long-context rates use the official threshold, which may be 272K rather than 200K. Snapshot IDs without an exact price match are flagged.",
+      "Long-context rates follow the input-token threshold, not bytes (KB). Both tiers appear together; image and text tokens have separate prices.",
     syncPricing: "Sync official prices",
     pricingSyncing: "Syncing prices…",
     pricingSynced: "Updated {count} model prices.",
@@ -278,6 +286,13 @@ export const messages = {
     model_sync_error: "Model sync status",
   },
   zh: {
+    textTokens: "文本 Token",
+    imageTokens: "图像 Token",
+    standardRate: "标准价格",
+    shortContextUpTo: "≤ {tokens} 输入 Token",
+    longContextFrom: "> {tokens} 输入 Token",
+    longContextRate: "长上下文",
+    imagePricingHint: "文本与图像 Token 分别计价，图片输出使用图像单价。",
     costUnavailable: "费用未知",
     cacheWriteIncluded: "其中：缓存写入",
     cacheWrite30m: "30 分钟缓存写入",
@@ -315,10 +330,10 @@ export const messages = {
     usage_missing: "上游未返回完整用量。",
     pricing: "模型定价",
     platform: "平台",
-    pricingScope: "Standard 文本与向量定价 · 美元 / 百万 Token",
+    pricingScope: "Standard 文本、向量与图像定价 · 美元 / 百万 Token",
     pricingDescription: "按平台和精确模型 ID 管理官方 Token 价格。",
     pricingThresholdHint:
-      "长上下文按官方实际阈值分档，可能是 272K 而非 200K；未精确匹配到价格的快照模型会标红。",
+      "长上下文按输入 Token 数分档，不按 KB 计算；普通价和长上下文价一起显示，文本与图像 Token 分别计价。",
     syncPricing: "同步官方价格",
     pricingSyncing: "正在同步价格…",
     pricingSynced: "已更新 {count} 个模型的价格。",
