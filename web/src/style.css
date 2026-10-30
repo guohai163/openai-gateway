@@ -2110,6 +2110,8 @@ tbody tr:hover .actions-column {
 }
 .client-ip-result dt {
   color: var(--faint);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .client-ip-result dd {
   margin: 0;

@@ -9,7 +9,7 @@ export const messages = {
     ip_country: "Country",
     ip_city: "City",
     ip_asn: "ASN",
-    ip_asn_org: "ASN organization",
+    ip_asn_org: "ASN org.",
     ip_lookup_failed: "IP lookup failed. Please try again.",
     userKeysHint:
       "Manage your own private keys and spending. Up to 3 undeleted keys per user.",
