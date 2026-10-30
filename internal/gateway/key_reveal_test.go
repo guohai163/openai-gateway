@@ -109,3 +109,47 @@ func TestPrivateKeyRevealAndLegacyRecovery(t *testing.T) {
 		t.Fatal("deleted key revealed", w.Code)
 	}
 }
+
+func TestLegacyPrivateKeyRotationCreatesRecoverableKey(t *testing.T) {
+	a, _ := testApp(t)
+	seed(t, a)
+	ctx := context.Background()
+	session := randomToken(24)
+	if _, err := a.DB.Exec(ctx, "INSERT INTO sessions VALUES($1,'rotate-csrf',now()+interval '1 hour')", hash(session)); err != nil {
+		t.Fatal(err)
+	}
+	admin := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/admin/api/gateway_keys/g1/rotate", strings.NewReader(body))
+		r.AddCookie(&http.Cookie{Name: "gyai_session", Value: session})
+		r.Header.Set("X-CSRF-Token", "rotate-csrf")
+		w := httptest.NewRecorder()
+		a.Handler(nil).ServeHTTP(w, r)
+		return w
+	}
+	if w := admin("{}"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	} else {
+		var result struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Key == "" || !strings.HasPrefix(result.Key, gatewayKeyPrefix) {
+			t.Fatal("rotation did not return a new private key", w.Body.String(), err)
+		}
+		var digest string
+		var encrypted []byte
+		if err := a.DB.QueryRow(ctx, "SELECT token_hash,secret FROM gateway_keys WHERE id='g1'").Scan(&digest, &encrypted); err != nil {
+			t.Fatal(err)
+		}
+		if digest != hash(result.Key) || len(encrypted) == 0 {
+			t.Fatal("rotated key was not stored as hash and ciphertext")
+		}
+		w = admin("{}")
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "key_already_recoverable") {
+			t.Fatal("recoverable key was rotated twice", w.Code, w.Body.String())
+		}
+		var action string
+		if err := a.DB.QueryRow(ctx, "SELECT action FROM audit_logs WHERE resource_id='g1' ORDER BY created_at DESC LIMIT 1").Scan(&action); err != nil || action != "rotate" {
+			t.Fatal("rotation audit missing", action, err)
+		}
+	}
+}

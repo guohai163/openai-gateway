@@ -4,7 +4,7 @@
 
 源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
 
-最新版本：[v1.4.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.1`。
+最新版本：[v1.4.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.2`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -131,7 +131,7 @@ docker compose down
 
 私有密钥操作栏和新密钥弹窗均提供“如何使用”，自动填入完整密钥和当前网关地址，生成发送 `hi` 的 curl 示例。密钥输入框支持显示、隐藏及复制；明文只存在当前弹层内存中，不写入浏览器持久存储。默认示例模型为 `gpt-6-luna`，不可用时自动选择已授权且已同步的模型。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
 
-升级前只保存了哈希的旧私有 Key 无法从数据库还原。旧 Key 下次通过认证及 IP 白名单检查时，会自动补存 AES-GCM 加密副本；也可在“如何使用”中粘贴原密钥并点击“验证并保存原密钥”，服务器验证哈希匹配后保存。无需轮换密钥。无法获取原密钥且客户端也不再持有时，需要重新创建密钥。删除私有 Key 会同时清除加密副本。
+升级前只保存了哈希的旧私有 Key 无法从数据库还原。旧 Key 下次通过认证及 IP 白名单检查时，会自动补存 AES-GCM 加密副本；也可在“如何使用”中粘贴原密钥并点击“验证并保存原密钥”。如果原密钥已经丢失，点击“重新生成密钥”会原子撤销旧密钥并生成新的可回显密钥；客户端需要改用新密钥。删除私有 Key 会同时清除加密副本。
 
 `0.0.0.0/32` 只允许来源地址恰好为 `0.0.0.0` 的请求，并不表示全部地址。允许所有 IPv4 地址使用 `0.0.0.0/0`，所有 IPv6 地址使用 `::/0`，也可填写实际来源 IP 或网段；两种地址族分别匹配。认证成功但白名单拒绝时，错误响应的 `error.client_ip` 返回网关识别到的来源 IP，便于核对。
 
@@ -174,6 +174,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 私有 Key 使用 `models` 数组设置模型权限；`["*"]` 表示全部当前及未来可用模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
 - `GET /logs|audit`；列表支持 `limit`（1–500）、`offset`。
 - `POST /gateway_keys/{id}/reveal` 在管理员会话及 CSRF 校验后返回明文，响应带 `Cache-Control: no-store`；请求体 `{}`，或 `{"key":"原密钥"}` 验证补录旧密钥。列表只返回 `can_reveal`，不返回哈希或密文。回显和补录操作保存管理审计，不记录密钥值。
+- `POST /gateway_keys/{id}/rotate` 仅用于没有加密副本的旧私有 Key；管理员会话和 CSRF 校验通过后生成新 Key，撤销旧哈希并返回一次明文。响应带 `Cache-Control: no-store`，操作保存管理审计，不记录密钥值。
 - `DELETE /gateway_keys/{id}` 删除私有密钥，要求管理员会话和 CSRF。删除会撤销原凭据、停用并隐藏该密钥，保留历史调用、用量与 Responses 归属；已删除密钥不可通过编辑重新启用。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。

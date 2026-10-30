@@ -83,6 +83,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			a.revealGatewayKey(w, r, parts[1])
 			return
 		}
+		if resource == "gateway_keys" && parts[2] == "rotate" && r.Method == "POST" {
+			a.rotateGatewayKey(w, r, parts[1])
+			return
+		}
 		if resource == "upstream_keys" && parts[2] == "model_catalog" && r.Method == "GET" {
 			var b []byte
 			err := a.DB.QueryRow(r.Context(), "SELECT json_build_object('catalog',model_catalog,'synced_at',model_synced_at) FROM upstream_keys WHERE id=$1", parts[1]).Scan(&b)

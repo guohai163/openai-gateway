@@ -19,9 +19,11 @@ export const messages = {
     revealKey: "Reveal key",
     hideKey: "Hide key",
     rememberOriginalKey: "Verify & save original key",
+    regenerateKey: "Regenerate key",
     key_not_recoverable:
       "This older key has only a hash. Paste the original and save it, or use it successfully once to enable automatic fill.",
     key_mismatch: "This is not the original key for this record.",
+    key_already_recoverable: "This key can already be revealed.",
     key_decryption_failed:
       "Unable to decrypt this key. Check the deployment MASTER_KEY.",
     token_usage: "Tokens / cache",
@@ -300,9 +302,11 @@ export const messages = {
     revealKey: "显示密钥",
     hideKey: "隐藏密钥",
     rememberOriginalKey: "验证并保存原密钥",
+    regenerateKey: "重新生成密钥",
     key_not_recoverable:
       "此旧密钥只保存了哈希。填入原密钥并验证保存，或成功使用一次后，即可自动回显。",
     key_mismatch: "填写的密钥与本条记录不匹配。",
+    key_already_recoverable: "此密钥已经可以直接回显。",
     key_decryption_failed: "密钥解密失败，请检查部署时的 MASTER_KEY。",
     token_usage: "Token / 缓存",
     request_cost: "Token 费用",

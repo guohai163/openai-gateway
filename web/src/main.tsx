@@ -1191,6 +1191,12 @@ function App() {
               body: JSON.stringify(original ? { key: original } : {}),
             })
           }
+          rotateKey={() =>
+            api(`gateway_keys/${usage.id}/rotate`, {
+              method: "POST",
+              body: "{}",
+            })
+          }
           onClose={() => setUsage(null)}
           t={t}
         />

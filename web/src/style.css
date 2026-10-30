@@ -1368,6 +1368,16 @@ tbody tr:hover .actions-column {
   flex-shrink: 0;
   padding: 9px;
 }
+.legacy-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+.legacy-key-actions .danger-button {
+  padding: 8px 11px;
+  font-size: 12px;
+}
 .request-token-cell {
   display: grid;
   gap: 9px;

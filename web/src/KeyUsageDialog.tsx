@@ -9,6 +9,7 @@ type Props = {
   initialKey?: string;
   showKey?: boolean;
   loadKey: (original?: string) => Promise<{ key: string }>;
+  rotateKey: () => Promise<{ key: string }>;
   onClose: () => void;
   t: (key: string) => string;
 };
@@ -20,6 +21,7 @@ export function KeyUsageDialog({
   initialKey = "",
   showKey = false,
   loadKey,
+  rotateKey,
   onClose,
   t,
 }: Props) {
@@ -40,6 +42,7 @@ export function KeyUsageDialog({
   const [keyLoading, setKeyLoading] = useState(!initialKey);
   const [keyError, setKeyError] = useState("");
   const [legacy, setLegacy] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const id = useId();
   const permitted =
     allowedModels.includes("*") || allowedModels.includes(model.trim());
@@ -148,30 +151,57 @@ export function KeyUsageDialog({
                 </small>
               )}
               {legacy && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={!key.trim() || keyLoading}
-                  onClick={async () => {
-                    setKeyLoading(true);
-                    setKeyError("");
-                    try {
-                      const result = await loadKey(key.trim());
-                      setKey(result.key);
-                      setLegacy(false);
-                    } catch (error) {
-                      setKeyError(
-                        error instanceof Error
-                          ? error.message
-                          : "unexpected_error",
-                      );
-                    } finally {
-                      setKeyLoading(false);
-                    }
-                  }}
-                >
-                  {t("rememberOriginalKey")}
-                </button>
+                <div className="legacy-key-actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!key.trim() || keyLoading || rotating}
+                    onClick={async () => {
+                      setKeyLoading(true);
+                      setKeyError("");
+                      try {
+                        const result = await loadKey(key.trim());
+                        setKey(result.key);
+                        setLegacy(false);
+                      } catch (error) {
+                        setKeyError(
+                          error instanceof Error
+                            ? error.message
+                            : "unexpected_error",
+                        );
+                      } finally {
+                        setKeyLoading(false);
+                      }
+                    }}
+                  >
+                    {t("rememberOriginalKey")}
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={keyLoading || rotating}
+                    onClick={async () => {
+                      setRotating(true);
+                      setKeyError("");
+                      try {
+                        const result = await rotateKey();
+                        setKey(result.key);
+                        setVisible(true);
+                        setLegacy(false);
+                      } catch (error) {
+                        setKeyError(
+                          error instanceof Error
+                            ? error.message
+                            : "unexpected_error",
+                        );
+                      } finally {
+                        setRotating(false);
+                      }
+                    }}
+                  >
+                    {t(rotating ? "loading" : "regenerateKey")}
+                  </button>
+                </div>
               )}
             </label>
             <label>
