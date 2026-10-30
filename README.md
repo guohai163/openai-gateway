@@ -4,7 +4,7 @@
 
 源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
 
-![AI Gateway project icon](web/public/gyai-icon.png)
+![AI Gateway project icon](web/public/openai-icon.png)
 
 最新版本：[v1.8.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.8.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.8.1`。
 
@@ -42,6 +42,7 @@ openssl rand -hex 24      # 将结果填入 .env 的 ADMIN_PASSWORD
 | 变量 | 说明 |
 | --- | --- |
 | `GATEWAY_IMAGE` | 默认 `ghcr.io/guohai163/openai-gateway:latest`，也可指定版本或 SHA 标签 |
+| `POSTGRES_USER` / `POSTGRES_DB` | 数据库用户和库名，默认均为 `openai`；已有数据库沿用原值 |
 | `POSTGRES_PASSWORD` | PostgreSQL 密码；第一次初始化后保持不变 |
 | `MASTER_KEY` | `openssl rand -base64 32` 生成的加密主密钥；必须随数据库备份妥善保存 |
 | `ADMIN_USERNAME` | 管理员用户名，默认 `admin` |
@@ -85,7 +86,7 @@ docker compose up -d
 
 ### Nginx 前面还有 PROXY protocol 负载均衡
 
-对于 `listen 443 ssl proxy_protocol`，还需要让 Nginx 使用 PROXY protocol 的客户端地址替换 `$remote_addr`。完整示例见 [deploy/nginx-proxy-protocol.conf](deploy/nginx-proxy-protocol.conf)，已包含你的 `gyai.dev` 域名与 SSE 设置。
+对于 `listen 443 ssl proxy_protocol`，还需要让 Nginx 使用 PROXY protocol 的客户端地址替换 `$remote_addr`。完整示例见 [deploy/nginx-proxy-protocol.conf](deploy/nginx-proxy-protocol.conf)，使用示例域名 `openai.dev`，已包含 SSE 设置；部署时替换域名和证书路径。
 
 ```nginx
 # 仅信任实际向 Nginx 发送 PROXY protocol 的负载均衡器地址，示例须替换。
@@ -140,10 +141,10 @@ docker compose down
 
 ```sh
 curl https://ai.example.com/v1/models \
-  -H "Authorization: Bearer $GYAI_KEY"
+  -H "Authorization: Bearer $OPENAI_KEY"
 
 curl https://ai.example.com/v1/responses \
-  -H "Authorization: Bearer $GYAI_KEY" \
+  -H "Authorization: Bearer $OPENAI_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"你的可用模型ID","input":"你好","stream":true}'
 ```
@@ -174,13 +175,13 @@ curl https://ai.example.com/v1/responses \
 ```bash
 # 生成图片：返回 JSON；使用 stream:true 可接收原始 SSE 事件。
 curl https://ai.example.com/v1/images/generations \
-  -H "Authorization: Bearer $GYAI_KEY" \
+  -H "Authorization: Bearer $OPENAI_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"gpt-image-2.5-flare","prompt":"一只坐在云上的水獭","size":"1024x1024","quality":"high"}'
 
 # 上传参考图片编辑；可重复 image[]，也可添加 -F 'mask=@mask.png'。
 curl https://ai.example.com/v1/images/edits \
-  -H "Authorization: Bearer $GYAI_KEY" \
+  -H "Authorization: Bearer $OPENAI_KEY" \
   -F 'model=gpt-image-2.5-sunburst' \
   -F 'image[]=@input.png' \
   -F 'prompt=把背景改为星空' \
@@ -188,7 +189,7 @@ curl https://ai.example.com/v1/images/edits \
 
 # JSON 编辑支持 URL 或 data URL；网关不下载这些 URL。
 curl https://ai.example.com/v1/images/edits \
-  -H "Authorization: Bearer $GYAI_KEY" \
+  -H "Authorization: Bearer $OPENAI_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"gpt-image-2.5-sunburst","images":[{"image_url":"https://example.com/input.png"}],"prompt":"把背景改为星空"}'
 ```
@@ -347,7 +348,7 @@ npm ci
 npm test
 npm run build
 cd ..
-export DATABASE_URL='postgresql://user:password@localhost:5432/gyai?sslmode=disable'
+export DATABASE_URL='postgresql://user:password@localhost:5432/openai?sslmode=disable'
 export MASTER_KEY="$(openssl rand -base64 32)"
 export ADMIN_PASSWORD='replace-with-a-unique-long-password'
 export COOKIE_SECURE=false
@@ -368,6 +369,15 @@ TEST_DATABASE_URL='postgresql://user:password@localhost:5432/testdb?sslmode=disa
 
 ## 已部署旧版本的升级
 
+项目命名统一为 `openai`，新数据库用户和库名默认均为 `openai`。已有 PostgreSQL 数据卷不会随环境变量自动改名；替换 Compose 文件前执行以下命令，将当前实际用户和库名保存在 `.env`，新配置会沿用它们：
+
+```sh
+docker compose exec -T postgres sh -c \
+  'printf "\nPOSTGRES_USER=%s\nPOSTGRES_DB=%s\n" "$POSTGRES_USER" "$POSTGRES_DB"' >> .env
+```
+
+会话 Cookie 改名后需要重新登录，语言偏好需重新选择。已有私有 Key 按原值和哈希认证，无须重新生成；新密文使用新的认证标签，旧密文保留兼容读取，上游 Key 和 OTP 无须重新绑定。回滚前先恢复数据库备份，旧版本无法解密升级后新增的密文。
+
 启动时自动执行数据库迁移，将旧组织/上游项目继承的启停、额度阻断、探测模型和冷却时间转存到各上游 Key。已有密钥密文、模型列表、私有 Key、调用记录、Responses 归属及独立网关项目均保留，无须重新导入。
 
 组织、上游项目和官方费用历史表归档为 `archived_*`，不再提供管理入口或参与调度；旧 Admin Key 凭据字段移除。旧的组织管理、Admin Key 校验、官方费用与密钥发现接口已删除。
@@ -379,10 +389,10 @@ TEST_DATABASE_URL='postgresql://user:password@localhost:5432/testdb?sslmode=disa
 数据库卷保存配置、密钥密文、会话、响应归属、日志与统计。必须同时保管 `MASTER_KEY`；丢失后无法解密上游凭据或回显私有密钥（私有密钥仍可通过哈希认证）。
 
 ```sh
-docker compose exec -T postgres pg_dump -U gyai -d gyai -Fc > gyai.dump
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > openai.dump
 # 在新建空数据库中恢复，恢复时先停止网关。
 docker compose stop gateway
-cat gyai.dump | docker compose exec -T postgres pg_restore -U gyai -d gyai --clean --if-exists
+cat openai.dump | docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists'
 docker compose up -d gateway
 ```
 

@@ -77,13 +77,13 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resource == "logout" && r.Method == "POST" {
-		cookie, _ := r.Cookie("gyai_session")
+		cookie, _ := r.Cookie("openai_session")
 		_, e := a.DB.Exec(r.Context(), "DELETE FROM sessions WHERE token_hash=$1", hash(cookie.Value))
 		if e != nil {
 			adminDBError(w, e)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "gyai_session", Value: "", Path: "/admin/api", MaxAge: -1, HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode})
+		http.SetCookie(w, &http.Cookie{Name: "openai_session", Value: "", Path: "/admin/api", MaxAge: -1, HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode})
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}

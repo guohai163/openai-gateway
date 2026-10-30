@@ -45,7 +45,7 @@ func fixtureSession(t *testing.T, a *App, server, id string) testSession {
 	if _, err := a.DB.Exec(context.Background(), "INSERT INTO sessions(token_hash,csrf,expires_at,user_id) VALUES($1,$2,now()+interval '1 hour',$3)", hash(token), csrf, id); err != nil {
 		t.Fatal(err)
 	}
-	return testSession{&http.Cookie{Name: "gyai_session", Value: token}, csrf, server}
+	return testSession{&http.Cookie{Name: "openai_session", Value: token}, csrf, server}
 }
 func loginChallenge(t *testing.T, server, email, password string) (map[string]any, *http.Cookie) {
 	t.Helper()
@@ -63,10 +63,10 @@ func loginChallenge(t *testing.T, server, email, password string) (map[string]an
 	}
 	var cookie *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "gyai_session" {
+		if c.Name == "openai_session" {
 			t.Fatal("session granted before OTP")
 		}
-		if c.Name == "gyai_challenge" {
+		if c.Name == "openai_challenge" {
 			cookie = c
 		}
 	}
@@ -91,7 +91,7 @@ func finishChallenge(t *testing.T, server string, v map[string]any, cookie *http
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 	var session *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "gyai_session" {
+		if c.Name == "openai_session" {
 			session = c
 		}
 	}
@@ -364,14 +364,14 @@ func TestDisabledOwnerAndPricingEnforcedDuringCalls(t *testing.T) {
 	}))
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
-	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model"}`); status != 200 {
+	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model"}`); status != 200 {
 		t.Fatal(status)
 	}
 	_, _ = a.DB.Exec(ctx, "UPDATE model_pricing SET source_current=false")
-	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model"}`); status != 403 {
+	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model"}`); status != 403 {
 		t.Fatal("unpriced model called", status)
 	}
-	status, b := request(t, srv.URL, "GET", "/v1/models", "gyai-g1", "")
+	status, b := request(t, srv.URL, "GET", "/v1/models", "openai-g1", "")
 	if status != 200 || bytes.Contains(b, []byte("test-model")) {
 		t.Fatal("API model catalog leaked unpriced model", status, string(b))
 	}
@@ -382,7 +382,7 @@ func TestDisabledOwnerAndPricingEnforcedDuringCalls(t *testing.T) {
 	if status, _ := user.call(t, "GET", "session", ""); status != 401 {
 		t.Fatal("disabled user session active", status)
 	}
-	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model"}`); status != 401 {
+	if status, _ := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model"}`); status != 401 {
 		t.Fatal("disabled owner key active", status)
 	}
 	if count.Load() != 1 {

@@ -140,7 +140,7 @@ func TestRequestCostsStreamsAndTrustedIP(t *testing.T) {
 	call := func(method, path string) {
 		t.Helper()
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"model":"test-model","input":"hi","stream":true}`))
-		r.Header.Set("Authorization", "Bearer gyai-g1")
+		r.Header.Set("Authorization", "Bearer openai-g1")
 		r.Header.Set("X-Forwarded-For", "127.0.0.9, 203.0.113.5")
 		resp, err := http.DefaultClient.Do(r)
 		if err != nil {

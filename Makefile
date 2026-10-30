@@ -1,7 +1,7 @@
 .PHONY: build test integration dev
 build:
 	cd web && npm ci && npm run build
-	go build -o bin/gyai-gateway ./cmd/gateway
+	go build -o bin/openai-gateway ./cmd/gateway
 
 test:
 	go test -race ./...

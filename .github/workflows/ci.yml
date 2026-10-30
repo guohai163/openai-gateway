@@ -63,11 +63,11 @@ jobs:
         env:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
         run: |
-          docker run -d --name gyai-smoke --network host \
+          docker run -d --name openai-smoke --network host \
             -e DATABASE_URL -e MASTER_KEY -e ADMIN_PASSWORD \
             -e COOKIE_SECURE=false -e LISTEN_ADDR=127.0.0.1:8080 \
             openai-gateway:test
-          trap 'docker logs gyai-smoke; docker rm -f gyai-smoke' EXIT
+          trap 'docker logs openai-smoke; docker rm -f openai-smoke' EXIT
           ready=false
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/healthz; then

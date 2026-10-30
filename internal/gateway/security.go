@@ -38,7 +38,7 @@ func seal(key []byte, s string) ([]byte, error) {
 	if _, e = rand.Read(nonce); e != nil {
 		return nil, e
 	}
-	return g.Seal(nonce, nonce, []byte(s), []byte("gyai-credential-v1")), nil
+	return g.Seal(nonce, nonce, []byte(s), []byte("openai-credential-v1")), nil
 }
 func openSecret(key, blob []byte) (string, error) {
 	b, e := aes.NewCipher(key)
@@ -52,7 +52,12 @@ func openSecret(key, blob []byte) (string, error) {
 	if len(blob) < g.NonceSize() {
 		return "", errors.New("invalid encrypted credential")
 	}
-	v, e := g.Open(nil, blob[:g.NonceSize()], blob[g.NonceSize():], []byte("gyai-credential-v1"))
+	v, e := g.Open(nil, blob[:g.NonceSize()], blob[g.NonceSize():], []byte("openai-credential-v1"))
+	if e != nil {
+		// Historical ciphertext authenticates this exact label. Keep read support
+		// so existing upstream keys, private keys and TOTP secrets survive upgrades.
+		v, e = g.Open(nil, blob[:g.NonceSize()], blob[g.NonceSize():], []byte("gyai-credential-v1"))
+	}
 	return string(v), e
 }
 func contains(ps []netip.Prefix, ip netip.Addr) bool {

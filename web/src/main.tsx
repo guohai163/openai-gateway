@@ -80,7 +80,7 @@ async function api(path: string, options: RequestInit = {}) {
 }
 function App() {
   const [preference, setPreference] = useState(
-      localStorage.getItem("gyai-language") || "auto",
+      localStorage.getItem("openai-language") || "auto",
     ),
     [browser, setBrowser] = useState(navigator.languages as readonly string[]);
   const language = resolveLanguage(preference, [...browser]) as "en" | "zh",
@@ -132,7 +132,7 @@ function App() {
   const authChannel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
-    const channel = new BroadcastChannel("gyai-auth");
+    const channel = new BroadcastChannel("openai-auth");
     authChannel.current = channel;
     channel.onmessage = () => window.location.reload();
     return () => {
@@ -185,7 +185,7 @@ function App() {
   useEffect(() => {
     document.documentElement.lang = locale;
     document.title = `${t("brand")} · ${t("product")}`;
-    localStorage.setItem("gyai-language", preference);
+    localStorage.setItem("openai-language", preference);
   }, [preference, language]);
   function fail(e: unknown) {
     const code = e instanceof Error ? e.message : "unexpected_error";
@@ -392,7 +392,7 @@ function App() {
   const mark = (
     <span className="wordmark">
       <span className="logo">
-        <img src="/gyai-icon.png" alt="" />
+        <img src="/openai-icon.png" alt="" />
       </span>
       <span>
         {t("brand")}
@@ -403,7 +403,7 @@ function App() {
   if (session === undefined)
     return (
       <div className="boot">
-        <img src="/gyai-icon.png" alt="" />
+        <img src="/openai-icon.png" alt="" />
         {t("loading")}
       </div>
     );

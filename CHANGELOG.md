@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 项目内包名、构建产物、图标路径、Cookie、浏览器存储、示例和测试命名统一为 `openai`。
+- PostgreSQL 默认用户和库名改为 `openai`，支持通过 `POSTGRES_USER` / `POSTGRES_DB` 沿用已有数据库；升级和备份命令见 README。
+- 新凭据使用新的加密认证标签，保留旧密文读取和已有私有 Key 的认证兼容。Cookie 改名后需重新登录。
+
 ## v1.8.1 - 2026-10-30
 
 ### Fixed

@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
@@ -31,6 +34,39 @@ func TestCredentialEncryption(t *testing.T) {
 	}
 	if _, e = openSecret(key, []byte("bad")); e == nil {
 		t.Fatal("short ciphertext accepted")
+	}
+}
+
+func TestCredentialBrandingCompatibility(t *testing.T) {
+	key := bytes.Repeat([]byte{1}, 32)
+	// Fixed ciphertext produced by the previous release with the same test key.
+	legacy, err := base64.StdEncoding.DecodeString("AgICAgICAgICAgICdL3kLDI+som6otvlP9Wn1sfbpYaK3S2GjOZdLyUnmSlRRYgvT3o=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, err := openSecret(key, legacy); err != nil || plain != "sk-existing-credential" {
+		t.Fatal("previously encrypted credentials are unreadable", err)
+	}
+	legacy[len(legacy)-1] ^= 1
+	if _, err := openSecret(key, legacy); err == nil {
+		t.Fatal("tampered legacy ciphertext was accepted")
+	}
+
+	sealed, err := seal(key, "new-credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], []byte("openai-credential-v1"))
+	if err != nil || string(plain) != "new-credential" {
+		t.Fatal("new ciphertext does not use the renamed authentication label", err)
 	}
 }
 func TestClientIP(t *testing.T) {

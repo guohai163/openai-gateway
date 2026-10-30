@@ -16,10 +16,10 @@ function curlArguments(command) {
 
 test("copyable example uses the current gateway, requested model and hi input", () => {
   const args = curlArguments(
-    buildCurlExample("https://gyai.dev", undefined, "gk-ai-example-key"),
+    buildCurlExample("https://openai.dev", undefined, "gk-ai-example-key"),
   );
   assert.equal(exampleModel, "gpt-6-luna");
-  assert.ok(args.includes("https://gyai.dev/v1/responses"));
+  assert.ok(args.includes("https://openai.dev/v1/responses"));
   assert.ok(args.includes("Authorization: Bearer gk-ai-example-key"));
   assert.ok(args.includes("Content-Type: application/json"));
   assert.deepEqual(JSON.parse(args[args.indexOf("--data-raw") + 1]), {

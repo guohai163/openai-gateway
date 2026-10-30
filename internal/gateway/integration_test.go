@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,9 +95,32 @@ func seed(t *testing.T, a *App) {
 		}
 	}
 	for _, k := range []string{"g1", "g2"} {
-		if _, e := a.DB.Exec(ctx, `INSERT INTO gateway_keys(id,name,token_hash,prefix,models,cidrs) VALUES($1,$1,$2,'gyai-test','{test-model}','{127.0.0.1/32,::1/128}')`, k, hash("gyai-"+k)); e != nil {
+		if _, e := a.DB.Exec(ctx, `INSERT INTO gateway_keys(id,name,token_hash,prefix,models,cidrs) VALUES($1,$1,$2,'openai-test','{test-model}','{127.0.0.1/32,::1/128}')`, k, hash("openai-"+k)); e != nil {
 			t.Fatal(e)
 		}
+	}
+}
+
+func TestExistingPrivateKeySurvivesBrandingRename(t *testing.T) {
+	a, srv := testApp(t)
+	seed(t, a)
+	// The fixture contains an issued historical key encrypted by the old release.
+	legacy, err := base64.StdEncoding.DecodeString("AgICAgICAgICAgICYK+oIGcyuZSguNWmO4qh3svQv5vG2ugI4tRjWkMYF8LmfNb6U+putA==")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := openSecret(a.Config.MasterKey, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.DB.Exec(context.Background(), "UPDATE gateway_keys SET token_hash=$1,secret=$2 WHERE id='g1'", hash(token), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", token, ""); status != 200 {
+		t.Fatal("an existing issued key stopped authenticating", status)
+	}
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", token+"-invalid", ""); status != 401 {
+		t.Fatal("an unissued key bypassed authentication", status)
 	}
 }
 func TestProxyRoutingAndOwnership(t *testing.T) {
@@ -128,7 +152,7 @@ func TestProxyRoutingAndOwnership(t *testing.T) {
 	defer upstream.Close()
 	a.Config.UpstreamURL = upstream.URL
 	for i := 0; i < 4; i++ {
-		status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model","messages":[]}`)
+		status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model","messages":[]}`)
 		if status != 200 {
 			t.Fatalf("%d %s", status, b)
 		}
@@ -138,43 +162,43 @@ func TestProxyRoutingAndOwnership(t *testing.T) {
 		t.Fatal(counts)
 	}
 	mu.Unlock()
-	status, b := request(t, srv.URL, "POST", "/v1/responses", "gyai-g1", `{"model":"test-model","input":"secret prompt"}`)
+	status, b := request(t, srv.URL, "POST", "/v1/responses", "openai-g1", `{"model":"test-model","input":"secret prompt"}`)
 	if status != 200 {
 		t.Fatalf("%d %s", status, b)
 	}
 	var v map[string]any
 	_ = json.Unmarshal(b, &v)
 	id := v["id"].(string)
-	if status, b = request(t, srv.URL, "POST", "/v1/responses", "gyai-g1", fmt.Sprintf(`{"model":"test-model","previous_response_id":%q,"input":"next"}`, id)); status != 200 {
+	if status, b = request(t, srv.URL, "POST", "/v1/responses", "openai-g1", fmt.Sprintf(`{"model":"test-model","previous_response_id":%q,"input":"next"}`, id)); status != 200 {
 		t.Fatalf("continuation: %d %s", status, b)
 	}
-	if status, _ = request(t, srv.URL, "GET", "/v1/responses/"+id, "gyai-g2", ""); status != 404 {
+	if status, _ = request(t, srv.URL, "GET", "/v1/responses/"+id, "openai-g2", ""); status != 404 {
 		t.Fatal("cross-key response visible", status)
 	}
-	if status, _ = request(t, srv.URL, "POST", "/v1/responses", "gyai-g2", fmt.Sprintf(`{"model":"test-model","previous_response_id":%q}`, id)); status != 404 {
+	if status, _ = request(t, srv.URL, "POST", "/v1/responses", "openai-g2", fmt.Sprintf(`{"model":"test-model","previous_response_id":%q}`, id)); status != 404 {
 		t.Fatal("cross-key lineage visible")
 	}
 	// Reset only in-memory state: bindings are persisted in PostgreSQL.
 	a.rr = map[string]uint64{}
-	if status, _ = request(t, srv.URL, "GET", "/v1/responses/"+id, "gyai-g1", ""); status != 200 {
+	if status, _ = request(t, srv.URL, "GET", "/v1/responses/"+id, "openai-g1", ""); status != 200 {
 		t.Fatal("binding not persisted")
 	}
 	var total int64
 	if e := a.DB.QueryRow(context.Background(), "SELECT sum(input_tokens) FROM response_usage").Scan(&total); e != nil || total != 24 {
 		t.Fatalf("usage accounting: %d %v", total, e)
 	}
-	if status, _ = request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"forbidden"}`); status != 403 {
+	if status, _ = request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"forbidden"}`); status != 403 {
 		t.Fatal("model permission bypass")
 	}
-	if status, b = request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 200 || !bytes.Contains(b, []byte("test-model")) {
+	if status, b = request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 200 || !bytes.Contains(b, []byte("test-model")) {
 		t.Fatal("models", status, string(b))
 	}
 	_, _ = a.DB.Exec(context.Background(), "UPDATE gateway_keys SET cidrs='{192.0.2.1/32}' WHERE id='g1'")
-	if status, _ = request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 403 {
+	if status, _ = request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 403 {
 		t.Fatal("IP allowlist bypass")
 	}
 	_, _ = a.DB.Exec(context.Background(), "UPDATE gateway_keys SET expires_at=now()-interval '1 second' WHERE id='g2'")
-	if status, _ = request(t, srv.URL, "GET", "/v1/models", "gyai-g2", ""); status != 401 {
+	if status, _ = request(t, srv.URL, "GET", "/v1/models", "openai-g2", ""); status != 401 {
 		t.Fatal("expired key accepted")
 	}
 }
@@ -318,7 +342,7 @@ func TestSSEBindingBeforeEventAndUsageDedup(t *testing.T) {
 		if i == 1 {
 			method, path, body = "GET", "/v1/responses/resp-stream?stream=true", ""
 		}
-		status, b := request(t, srv.URL, method, path, "gyai-g1", body)
+		status, b := request(t, srv.URL, method, path, "openai-g1", body)
 		if status != 200 || !bytes.Contains(b, []byte("response.completed")) {
 			t.Fatalf("stream %d %s", status, b)
 		}
@@ -359,7 +383,7 @@ func TestConcurrentDistributionAndFailover(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model"}`)
+			status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model"}`)
 			if status != 200 {
 				t.Errorf("concurrent request %d %s", status, b)
 			}
@@ -370,7 +394,7 @@ func TestConcurrentDistributionAndFailover(t *testing.T) {
 		t.Fatal("uneven concurrent distribution", one.Load(), two.Load())
 	}
 	reject.Store(true)
-	status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "gyai-g1", `{"model":"test-model"}`)
+	status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model"}`)
 	if status != 200 {
 		t.Fatalf("failover %d %s", status, b)
 	}
@@ -399,12 +423,12 @@ func TestNoReplayOnAmbiguousFailureAndStreamError(t *testing.T) {
 	}))
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
-	status, _ := request(t, srv.URL, "POST", "/v1/responses", "gyai-g1", `{"model":"test-model"}`)
+	status, _ := request(t, srv.URL, "POST", "/v1/responses", "openai-g1", `{"model":"test-model"}`)
 	if status != 500 || calls.Load() != 1 {
 		t.Fatal("ambiguous request replayed")
 	}
 	streaming.Store(true)
-	status, b := request(t, srv.URL, "POST", "/v1/responses", "gyai-g1", `{"model":"test-model","stream":true}`)
+	status, b := request(t, srv.URL, "POST", "/v1/responses", "openai-g1", `{"model":"test-model","stream":true}`)
 	if status != 200 || calls.Load() != 2 {
 		t.Fatal("started stream replayed")
 	}
@@ -426,7 +450,7 @@ func TestClientDisconnectCancelsUpstream(t *testing.T) {
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
 	req, _ := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","stream":true}`))
-	req.Header.Set("Authorization", "Bearer gyai-g1")
+	req.Header.Set("Authorization", "Bearer openai-g1")
 	resp, e := http.DefaultClient.Do(req)
 	if e != nil {
 		t.Fatal(e)

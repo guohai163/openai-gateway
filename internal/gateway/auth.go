@@ -104,7 +104,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		adminDBError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "gyai_challenge", Value: token, Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: 300})
+	http.SetCookie(w, &http.Cookie{Name: "openai_challenge", Value: token, Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: 300})
 	result := map[string]any{"mfa_required": true, "enroll": secret != "", "csrf": csrf}
 	if secret != "" {
 		result["secret"] = secret
@@ -116,7 +116,7 @@ func (a *App) completeMFA(w http.ResponseWriter, r *http.Request) {
 	if !a.loginAllowed(w, r) {
 		return
 	}
-	cookie, err := r.Cookie("gyai_challenge")
+	cookie, err := r.Cookie("openai_challenge")
 	if err != nil {
 		writeError(w, 401, "challenge_expired")
 		return
@@ -198,14 +198,14 @@ func (a *App) completeMFA(w http.ResponseWriter, r *http.Request) {
 		delete(a.loginAttempts, ip.String())
 		a.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "gyai_session", Value: token, Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, Expires: until})
-	http.SetCookie(w, &http.Cookie{Name: "gyai_challenge", Value: "", Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "openai_session", Value: token, Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, Expires: until})
+	http.SetCookie(w, &http.Cookie{Name: "openai_challenge", Value: "", Path: "/admin/api", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 	a.audit(context.WithValue(r.Context(), actorContext{}, me), "login", "users", id)
 	writeJSON(w, 200, map[string]any{"csrf": sessionCSRF, "username": me.Email, "user": me})
 }
 func (a *App) adminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("gyai_session")
+		cookie, err := r.Cookie("openai_session")
 		if err != nil {
 			writeError(w, 401, "unauthorized")
 			return
@@ -229,9 +229,8 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(auth, "Bearer ")
-		// Existing issued keys remain valid; new keys always use gatewayKeyPrefix.
-		validPrefix := strings.HasPrefix(token, gatewayKeyPrefix) || strings.HasPrefix(token, "gyai-")
-		if token == auth || !validPrefix || len(token) > 256 {
+		// Authenticate by the stored hash, independent of historical display prefixes.
+		if token == auth || token == "" || len(token) > 256 {
 			writeError(w, 401, "invalid_api_key")
 			return
 		}

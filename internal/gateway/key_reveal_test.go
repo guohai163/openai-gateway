@@ -21,7 +21,7 @@ func TestPrivateKeyRevealAndLegacyRecovery(t *testing.T) {
 	admin := func(method, path, body string, auth, csrf bool) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "/admin/api/"+path, strings.NewReader(body))
 		if auth {
-			r.AddCookie(&http.Cookie{Name: "gyai_session", Value: session})
+			r.AddCookie(&http.Cookie{Name: "openai_session", Value: session})
 		}
 		if csrf {
 			r.Header.Set("X-CSRF-Token", "reveal-csrf")
@@ -70,11 +70,11 @@ func TestPrivateKeyRevealAndLegacyRecovery(t *testing.T) {
 	if w.Code != 409 {
 		t.Fatal("legacy key should require original", w.Code)
 	}
-	w = admin("POST", "gateway_keys/g1/reveal", `{"key":"gyai-wrong"}`, true, true)
+	w = admin("POST", "gateway_keys/g1/reveal", `{"key":"openai-wrong"}`, true, true)
 	if w.Code != 400 {
 		t.Fatal("wrong original accepted", w.Code)
 	}
-	w = admin("POST", "gateway_keys/g1/reveal", `{"key":"gyai-g1"}`, true, true)
+	w = admin("POST", "gateway_keys/g1/reveal", `{"key":"openai-g1"}`, true, true)
 	if w.Code != 200 {
 		t.Fatal("verified original not saved", w.Code)
 	}
@@ -82,7 +82,7 @@ func TestPrivateKeyRevealAndLegacyRecovery(t *testing.T) {
 	if _, err = a.DB.Exec(ctx, "UPDATE gateway_keys SET cidrs='{192.0.2.1/32}' WHERE id='g2'"); err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g2", ""); status != 403 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g2", ""); status != 403 {
 		t.Fatal(status)
 	}
 	if err = a.DB.QueryRow(ctx, "SELECT secret FROM gateway_keys WHERE id='g2'").Scan(&cipher); err != nil || cipher != nil {
@@ -91,11 +91,11 @@ func TestPrivateKeyRevealAndLegacyRecovery(t *testing.T) {
 	if _, err = a.DB.Exec(ctx, "UPDATE gateway_keys SET cidrs='{127.0.0.1/32,::1/128}' WHERE id='g2'"); err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g2", ""); status != 200 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g2", ""); status != 200 {
 		t.Fatal(status)
 	}
 	w = admin("POST", "gateway_keys/g2/reveal", "{}", true, true)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "gyai-g2") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "openai-g2") {
 		t.Fatal("successful legacy authentication did not enable reveal", w.Code)
 	}
 	w = admin("DELETE", "gateway_keys/"+created.ID, "", true, true)
@@ -120,7 +120,7 @@ func TestLegacyPrivateKeyRotationCreatesRecoverableKey(t *testing.T) {
 	}
 	admin := func(body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/admin/api/gateway_keys/g1/rotate", strings.NewReader(body))
-		r.AddCookie(&http.Cookie{Name: "gyai_session", Value: session})
+		r.AddCookie(&http.Cookie{Name: "openai_session", Value: session})
 		r.Header.Set("X-CSRF-Token", "rotate-csrf")
 		w := httptest.NewRecorder()
 		a.Handler(nil).ServeHTTP(w, r)

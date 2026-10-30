@@ -116,7 +116,7 @@ func TestImageGenerationAndEditProxy(t *testing.T) {
 		expected, expectedType, expectedPath = []byte(tc.body), tc.contentType, tc.path+"?trace=1"
 		mu.Unlock()
 		req, _ := http.NewRequest("POST", srv.URL+tc.path+"?trace=1", strings.NewReader(tc.body))
-		req.Header.Set("Authorization", "Bearer gyai-g1")
+		req.Header.Set("Authorization", "Bearer openai-g1")
 		req.Header.Set("Content-Type", tc.contentType)
 		req.Header.Set("OpenAI-Organization", "client-org")
 		req.Header.Set("OpenAI-Project", "client-project")
@@ -153,18 +153,18 @@ func TestImageValidationAndModelAuthorization(t *testing.T) {
 		method, path, body, contentType, token string
 		status                                 int
 	}{
-		{"POST", "/v1/images/generations", `{"model":"forbidden"}`, "application/json", "gyai-g1", 403},
-		{"POST", "/v1/images/edits", string(duplicate), ct, "gyai-g1", 400},
-		{"POST", "/v1/images/edits", "broken", "multipart/form-data; boundary=broken", "gyai-g1", 400},
-		{"POST", "/v1/images/generations", "{}", "application/json", "gyai-g1", 400},
-		{"POST", "/v1/images/generations", `{"MODEL":"` + imageTestModel + `"}`, "application/json", "gyai-g1", 400},
-		{"POST", "/v1/images/generations", `{"model":"forbidden","MODEL":"` + imageTestModel + `"}`, "application/json", "gyai-g1", 403},
-		{"POST", "/v1/images/generations", `{"model":2}`, "application/json", "gyai-g1", 400},
-		{"POST", "/v1/images/generations", `null`, "application/json", "gyai-g1", 400},
-		{"POST", "/v1/images/generations", `{} {}`, "application/json", "gyai-g1", 400},
-		{"POST", "/v1/images/edits", "x", "text/plain", "gyai-g1", 415},
-		{"POST", "/v1/images/generations", "x", ct, "gyai-g1", 415},
-		{"GET", "/v1/images/generations", "", "application/json", "gyai-g1", 404},
+		{"POST", "/v1/images/generations", `{"model":"forbidden"}`, "application/json", "openai-g1", 403},
+		{"POST", "/v1/images/edits", string(duplicate), ct, "openai-g1", 400},
+		{"POST", "/v1/images/edits", "broken", "multipart/form-data; boundary=broken", "openai-g1", 400},
+		{"POST", "/v1/images/generations", "{}", "application/json", "openai-g1", 400},
+		{"POST", "/v1/images/generations", `{"MODEL":"` + imageTestModel + `"}`, "application/json", "openai-g1", 400},
+		{"POST", "/v1/images/generations", `{"model":"forbidden","MODEL":"` + imageTestModel + `"}`, "application/json", "openai-g1", 403},
+		{"POST", "/v1/images/generations", `{"model":2}`, "application/json", "openai-g1", 400},
+		{"POST", "/v1/images/generations", `null`, "application/json", "openai-g1", 400},
+		{"POST", "/v1/images/generations", `{} {}`, "application/json", "openai-g1", 400},
+		{"POST", "/v1/images/edits", "x", "text/plain", "openai-g1", 415},
+		{"POST", "/v1/images/generations", "x", ct, "openai-g1", 415},
+		{"GET", "/v1/images/generations", "", "application/json", "openai-g1", 404},
 		{"POST", "/v1/images/generations", `{"model":"` + imageTestModel + `"}`, "application/json", "invalid", 401},
 	} {
 		r, _ := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(tc.body))
@@ -213,7 +213,7 @@ func TestImageMultipartRetryPreservesBytesAndUUID(t *testing.T) {
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
 	r, _ := http.NewRequest("POST", srv.URL+"/v1/images/edits", bytes.NewReader(body))
-	r.Header.Set("Authorization", "Bearer gyai-g1")
+	r.Header.Set("Authorization", "Bearer openai-g1")
 	r.Header.Set("Content-Type", ct)
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -253,7 +253,7 @@ func TestImageStreamsPreserveLargeEventsAndDoNotReplayErrors(t *testing.T) {
 			fmt.Fprint(w, expected)
 		}))
 		a.Config.UpstreamURL = up.URL
-		status, body := request(t, srv.URL, "POST", tc.path, "gyai-g1", `{"model":"`+imageTestModel+`","prompt":"stream","stream":true}`)
+		status, body := request(t, srv.URL, "POST", tc.path, "openai-g1", `{"model":"`+imageTestModel+`","prompt":"stream","stream":true}`)
 		up.Close()
 		if status != 200 || string(body) != expected || calls.Load() != before+1 {
 			t.Fatal("image SSE changed or replayed", status, len(body), calls.Load()-before)
@@ -282,7 +282,7 @@ func TestImageMultipartArchivePreservesBinary(t *testing.T) {
 	body, ct := imageForm(t, imageTestModel)
 	r, _ := http.NewRequest("POST", srv.URL+"/v1/images/edits", bytes.NewReader(body))
 	r.Header.Set("Content-Type", ct)
-	r.Header.Set("Authorization", "Bearer gyai-g1")
+	r.Header.Set("Authorization", "Bearer openai-g1")
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)
@@ -402,7 +402,7 @@ func TestImageUploadAndResponseExceedTextLimit(t *testing.T) {
 		_ = writer.CloseWithError(err)
 	}()
 	r, _ := http.NewRequest("POST", srv.URL+"/v1/images/edits", reader)
-	r.Header.Set("Authorization", "Bearer gyai-g1")
+	r.Header.Set("Authorization", "Bearer openai-g1")
 	r.Header.Set("Content-Type", form.FormDataContentType())
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {

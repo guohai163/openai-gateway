@@ -121,7 +121,7 @@ func testExistingDatabaseMigration(t *testing.T, baseline int) {
 	for _, q := range []struct {
 		s    string
 		args []any
-	}{{"INSERT INTO organizations(id,name,upstream_id,enabled,quota_blocked,last_error,next_probe_at) VALUES('old-org','Old','org-original',false,true,'credit_balance_exhausted',now()+interval '5 minutes')", nil}, {"INSERT INTO " + projectTable + "(id,org_id,name,upstream_id,probe_model) VALUES('old-project','old-org','Old project','proj-original','test-model')", nil}, {keyInsert, []any{secret}}, {"INSERT INTO gateway_keys(id,name,token_hash,prefix,cidrs) VALUES('old-gateway','Client','hash','gyai','{127.0.0.1/32}')", nil}, {"INSERT INTO response_bindings(response_id,gateway_key_id,upstream_key_id,model) VALUES('old-response','old-gateway','old-key','test-model')", nil}} {
+	}{{"INSERT INTO organizations(id,name,upstream_id,enabled,quota_blocked,last_error,next_probe_at) VALUES('old-org','Old','org-original',false,true,'credit_balance_exhausted',now()+interval '5 minutes')", nil}, {"INSERT INTO " + projectTable + "(id,org_id,name,upstream_id,probe_model) VALUES('old-project','old-org','Old project','proj-original','test-model')", nil}, {keyInsert, []any{secret}}, {"INSERT INTO gateway_keys(id,name,token_hash,prefix,cidrs) VALUES('old-gateway','Client','hash','openai','{127.0.0.1/32}')", nil}, {"INSERT INTO response_bindings(response_id,gateway_key_id,upstream_key_id,model) VALUES('old-response','old-gateway','old-key','test-model')", nil}} {
 		if _, e = a.DB.Exec(ctx, q.s, q.args...); e != nil {
 			t.Fatal(e)
 		}

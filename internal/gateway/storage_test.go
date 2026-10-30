@@ -125,7 +125,7 @@ func TestS3RequestUUIDPathsAndOptIn(t *testing.T) {
 	for _, path := range []string{"/v1/embeddings", "/v1/chat/completions"} {
 		input := `{"model":"test-model","input":"body only, never headers"}`
 		r, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(input))
-		r.Header.Set("Authorization", "Bearer gyai-g1")
+		r.Header.Set("Authorization", "Bearer openai-g1")
 		r.Header.Set("X-Secret-Test", "never-archive-this-header")
 		resp, err := http.DefaultClient.Do(r)
 		if err != nil {
@@ -171,11 +171,11 @@ func TestS3RequestUUIDPathsAndOptIn(t *testing.T) {
 		} else if !bytes.Equal(out.([]byte), body) {
 			t.Fatal("JSON response changed")
 		}
-		if bytes.Contains(out.([]byte), []byte("never-archive-this-header")) || bytes.Contains(in.([]byte), []byte("gyai-g1")) {
+		if bytes.Contains(out.([]byte), []byte("never-archive-this-header")) || bytes.Contains(in.([]byte), []byte("openai-g1")) {
 			t.Fatal("authentication or headers archived")
 		}
 	}
-	status, _ := request(t, srv.URL, "POST", "/v1/embeddings", "gyai-g2", `{"model":"test-model","input":"do not store"}`)
+	status, _ := request(t, srv.URL, "POST", "/v1/embeddings", "openai-g2", `{"model":"test-model","input":"do not store"}`)
 	if status != 200 {
 		t.Fatal(status)
 	}
@@ -215,7 +215,7 @@ func TestArchiveStorageFailureDoesNotReplayOrChangeResponse(t *testing.T) {
 	}))
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
-	status, body := request(t, srv.URL, "POST", "/v1/embeddings", "gyai-g1", `{"model":"test-model","input":"hello"}`)
+	status, body := request(t, srv.URL, "POST", "/v1/embeddings", "openai-g1", `{"model":"test-model","input":"hello"}`)
 	if status != 200 || string(body) != `{"result":"original"}` {
 		t.Fatal("storage failure changed inference response", status)
 	}

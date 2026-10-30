@@ -38,7 +38,7 @@ func readImageRequest(w http.ResponseWriter, r *http.Request) (*imageRequest, in
 	if err != nil || (mediaType != "application/json" && !(r.URL.Path == "/v1/images/edits" && mediaType == "multipart/form-data")) {
 		return nil, 415, "unsupported_media_type"
 	}
-	f, err := os.CreateTemp("", "gyai-image-*")
+	f, err := os.CreateTemp("", "openai-image-*")
 	if err != nil {
 		return nil, 503, "request_buffer_unavailable"
 	}

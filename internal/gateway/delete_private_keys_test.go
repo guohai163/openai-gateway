@@ -14,7 +14,7 @@ func TestDeletePrivateKeyPreservesHistory(t *testing.T) {
 	a, srv := testApp(t)
 	seed(t, a)
 	ctx := context.Background()
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 200 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 200 {
 		t.Fatal("key was not usable before deletion", status)
 	}
 	if _, err := a.DB.Exec(ctx, `INSERT INTO response_bindings(response_id,gateway_key_id,upstream_key_id,model) VALUES('delete-response','g1','k1','test-model');
@@ -33,7 +33,7 @@ func TestDeletePrivateKeyPreservesHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		if authenticated {
-			req.AddCookie(&http.Cookie{Name: "gyai_session", Value: sessionToken})
+			req.AddCookie(&http.Cookie{Name: "openai_session", Value: sessionToken})
 		}
 		if csrf {
 			req.Header.Set("X-CSRF-Token", "delete-test-csrf")
@@ -55,21 +55,21 @@ func TestDeletePrivateKeyPreservesHistory(t *testing.T) {
 	if status, _ := adminRequest("DELETE", "gateway_keys/g1", "", true, false); status != 403 {
 		t.Fatal("delete did not require CSRF", status)
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 200 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 200 {
 		t.Fatal("unauthorized delete changed the key", status)
 	}
 	if status, body := adminRequest("DELETE", "gateway_keys/g1", "", true, true); status != 200 {
 		t.Fatal(status, string(body))
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 401 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 401 {
 		t.Fatal("deleted key still authenticated", status)
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g2", ""); status != 200 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g2", ""); status != 200 {
 		t.Fatal("deletion affected another key", status)
 	}
 	var disabled, deleted bool
 	var storedHash string
-	if err := a.DB.QueryRow(ctx, "SELECT NOT enabled,deleted_at IS NOT NULL,token_hash FROM gateway_keys WHERE id='g1'").Scan(&disabled, &deleted, &storedHash); err != nil || !disabled || !deleted || storedHash == hash("gyai-g1") {
+	if err := a.DB.QueryRow(ctx, "SELECT NOT enabled,deleted_at IS NOT NULL,token_hash FROM gateway_keys WHERE id='g1'").Scan(&disabled, &deleted, &storedHash); err != nil || !disabled || !deleted || storedHash == hash("openai-g1") {
 		t.Fatal("credential was not permanently revoked", err)
 	}
 	status, body := adminRequest("GET", "gateway_keys", "", true, true)
@@ -115,7 +115,7 @@ func TestDeletePrivateKeyPreservesHistory(t *testing.T) {
 	if _, err := a.DB.Exec(ctx, "UPDATE gateway_keys SET enabled=true,deleted_at=NULL WHERE id='g1'"); err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := request(t, srv.URL, "GET", "/v1/models", "gyai-g1", ""); status != 401 {
+	if status, _ := request(t, srv.URL, "GET", "/v1/models", "openai-g1", ""); status != 401 {
 		t.Fatal("old credential was resurrected", status)
 	}
 }
@@ -128,10 +128,10 @@ func TestIPAllowlistErrorsReportActualSource(t *testing.T) {
 		cidr, forwarded, token, ip string
 		status                     int
 	}{
-		{"0.0.0.0/32", "", "gyai-g1", "127.0.0.1", 403},
-		{"0.0.0.0/0", "", "gyai-g1", "", 200},
-		{"0.0.0.0/0", "2001:db8::42", "gyai-g1", "2001:db8::42", 403},
-		{"::/0", "2001:db8::42", "gyai-g1", "", 200},
+		{"0.0.0.0/32", "", "openai-g1", "127.0.0.1", 403},
+		{"0.0.0.0/0", "", "openai-g1", "", 200},
+		{"0.0.0.0/0", "2001:db8::42", "openai-g1", "2001:db8::42", 403},
+		{"::/0", "2001:db8::42", "openai-g1", "", 200},
 		{"0.0.0.0/32", "", "gk-ai-unknown", "", 401},
 	} {
 		if _, err := a.DB.Exec(context.Background(), "UPDATE gateway_keys SET cidrs=$1::cidr[] WHERE id='g1'", []string{tc.cidr}); err != nil {
