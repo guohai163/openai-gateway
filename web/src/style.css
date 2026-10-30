@@ -501,6 +501,126 @@ nav > button.selected {
 .overview-grid {
   margin-bottom: 24px;
 }
+.overview-analytics {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.trend-card {
+  min-width: 0;
+  padding: 22px;
+}
+.trend-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.trend-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.trend-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--subtle);
+}
+.trend-heading h2 {
+  font-size: 14px;
+  margin: 0 0 4px;
+}
+.trend-heading small,
+.model-activity-panel .panel-heading small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.trend-heading > strong {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.trend-chart-wrap {
+  margin-top: 18px;
+}
+.trend-chart {
+  display: block;
+  width: 100%;
+  height: 150px;
+  overflow: visible;
+}
+.trend-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.trend-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 18px 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.model-activity-panel {
+  padding: 22px;
+}
+.model-activity-table-wrap {
+  overflow-x: auto;
+  margin: 0 -22px -22px;
+}
+.model-activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.model-activity-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--subtle);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 11px 22px;
+  white-space: nowrap;
+}
+.model-activity-table td {
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.model-activity-table tr:last-child td {
+  border-bottom: 0;
+}
+.model-activity-table td:first-child {
+  color: var(--text);
+}
+.model-activity-table code {
+  font-size: 12px;
+}
+.token-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.compact {
+  padding: 25px 0 5px;
+}
+@media (max-width: 900px) {
+  .trend-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .infrastructure-row {
   display: flex;
   align-items: center;

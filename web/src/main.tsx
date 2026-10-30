@@ -37,6 +37,7 @@ import {
 } from "./theme.mjs";
 import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
+import { OverviewAnalytics } from "./OverviewAnalytics";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -702,6 +703,12 @@ function App() {
                   ))}
                 </section>
               </div>
+              <OverviewAnalytics
+                hourly={dashboard.hourly || []}
+                models={dashboard.models || []}
+                locale={locale}
+                t={t}
+              />
               <div className="connection-panel">
                 <div className="resource-icon">
                   <Terminal size={23} />

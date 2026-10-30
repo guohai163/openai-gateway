@@ -142,7 +142,21 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
  'requests_today',(SELECT count(DISTINCT id) FROM request_logs WHERE created_at>=date_trunc('day',now()) AND kind='inference'),
  'input_tokens',(SELECT coalesce(sum(input_tokens),0) FROM request_logs WHERE kind='inference'),
  'output_tokens',(SELECT coalesce(sum(output_tokens),0) FROM request_logs WHERE kind='inference'),
- 'blocked_scopes',(SELECT count(*) FROM upstream_keys WHERE quota_blocked))`).Scan(&b)
+ 'blocked_scopes',(SELECT count(*) FROM upstream_keys WHERE quota_blocked),
+ 'hourly',coalesce((SELECT json_agg(row_to_json(bucket) ORDER BY bucket.hour) FROM (
+   SELECT h AS hour,count(l.id)::bigint AS requests,
+     coalesce(sum(l.input_tokens),0)::bigint AS input_tokens,
+     coalesce(sum(l.output_tokens),0)::bigint AS output_tokens,
+     sum(l.total_cost)::text AS total_cost
+   FROM generate_series(date_trunc('hour',now())-interval '23 hours',date_trunc('hour',now()),interval '1 hour') h
+   LEFT JOIN request_logs l ON l.created_at>=h AND l.created_at<h+interval '1 hour' AND l.kind='inference'
+   GROUP BY h
+ ) bucket),'[]'::json),
+ 'models',coalesce((SELECT json_agg(row_to_json(model_row) ORDER BY model_row.requests DESC,model_row.model) FROM (
+   SELECT model,count(*)::bigint AS requests,coalesce(sum(input_tokens),0)::bigint AS input_tokens,
+     coalesce(sum(output_tokens),0)::bigint AS output_tokens,sum(total_cost)::text AS total_cost
+   FROM request_logs WHERE kind='inference' AND created_at>=now()-interval '24 hours' GROUP BY model
+ ) model_row),'[]'::json))`).Scan(&b)
 	if e != nil {
 		adminDBError(w, e)
 		return
