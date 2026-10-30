@@ -15,7 +15,7 @@ import (
 
 const maxBody = 32 << 20
 
-func (a *App) proxy(w http.ResponseWriter, r *http.Request) {
+func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	k := r.Context().Value(keyContext).(GatewayKey)
 	if r.URL.Path == "/v1/models" && r.Method == "GET" {
 		a.listModels(w, r, k)

@@ -16,9 +16,11 @@ type authContext int
 const keyContext authContext = 0
 
 type GatewayKey struct {
-	ID     string
-	Models []string
-	IP     netip.Addr
+	ID                      string
+	Name, RequestUUID       string
+	StoreInput, StoreOutput bool
+	Models                  []string
+	IP                      netip.Addr
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +113,7 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 		var k GatewayKey
 		var cidrs []string
 		var canReveal bool
-		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x),secret IS NOT NULL FROM gateway_keys WHERE token_hash=$1 AND enabled AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal)
+		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x),secret IS NOT NULL,name,store_input,store_output FROM gateway_keys WHERE token_hash=$1 AND enabled AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal, &k.Name, &k.StoreInput, &k.StoreOutput)
 		if e != nil {
 			writeError(w, 401, "invalid_api_key")
 			return

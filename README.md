@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/gyai-icon.png)
 
-最新版本：[v1.4.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.2`。
+最新版本：[v1.5.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.5.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.5.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -19,7 +19,7 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - 按上游 Key 记录额度阻断、认证错误与限流，支持定时小额探测自动恢复。
 - AES-256-GCM 加密上游凭据和私有 Key；私有 Key 另存 SHA-256 哈希用于认证，支持管理员回显；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
 - 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
-- 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。只记录调用元数据，不保存对话正文。
+- 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。默认只记录调用元数据；配置 S3 后可按私钥选择存储输入/输出 JSON。
 
 ## 使用 CI 镜像运行（推荐）
 
@@ -204,7 +204,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 输入 Token 使用绿色向下箭头、输出 Token 使用紫色向上箭头；展示各自金额及合计。点击费用旁的信息图标，展开本次调用的单位价格、缓存费用和长上下文档位。
 - 价格按请求的 `(platform, model)` 精确匹配并保存快照；实际返回模型 ID 也会保留。金额使用 `NUMERIC(30,16)`，计算过程不使用浮点数。后续同步单价不会修改历史金额。
 - 输入费用 = 普通输入 Token × 输入单价 + 缓存读取 Token × 缓存输入单价 + 各有效期缓存写入 Token × 对应写入单价，再除以一百万；输出费用按输出 Token 和对应档位输出单价计算。缓存 Token 包含在总输入中，不会重复计费。长上下文阈值使用总输入 Token（含缓存），超过阈值后输入和输出均使用长上下文单价。
-- Responses 读取 `usage.input_tokens_details.cached_tokens`，Chat Completions 读取 `usage.prompt_tokens_details.cached_tokens`：大于零标记“缓存命中”并显示 Token 数；明确为零标记“未命中缓存”；未返回字段显示“缓存未知”。向量接口显示“缓存不适用”。这是 OpenAI 上游的提示词缓存，网关没有缓存对话正文。参考：[官方 Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
+- Responses 读取 `usage.input_tokens_details.cached_tokens`，Chat Completions 读取 `usage.prompt_tokens_details.cached_tokens`：大于零标记“缓存命中”并显示 Token 数；明确为零标记“未命中缓存”；未返回字段显示“缓存未知”。向量接口显示“缓存不适用”。这是 OpenAI 上游的提示词缓存；可选 S3 归档与提示词缓存独立。参考：[官方 Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
 - 普通及 SSE 响应都会旁读用量。Chat Completions 流式请求应设置 `stream_options: {"include_usage": true}`；客户端断开或上游没有返回完整用量时，不推算缺失 Token、缓存命中或金额。接口转发内容保持原样。
 - 缓存写入返回有效期明细时，分别计算 `ttl_30m_tokens` / `ttl_12h_tokens`；未提供有效期或缺少对应单价时，输入费用显示未知。Batch/Flex/Fast 等不支持的服务档位、多模态价格、工具调用费和协议中未返回的其他费用不混入文本估算；以 OpenAI 官方账单为准。
 - 重复查询、恢复流及同一 Response 的并发读取不会重复累计，页面标记“用量已计入原记录”。旧调用记录没有可靠的缓存字段及价格快照，保留原始 Token 计数，费用显示未知，不按今天的价格回填。
@@ -321,3 +321,45 @@ docker compose up -d gateway
 迁移在启动时执行，使用版本表和数据库锁，升级前备份。日志和响应归属首版不自动删除，请按容量规划保留时间；删除归属记录会使对应响应无法续接。会话和过期冷却记录自动清理。
 
 首版运行一个 Go 实例。轮询游标与登录限速在进程内；状态、额度、探测计划和会话在 PostgreSQL。需要多副本时应先增加共享调度、探测锁和分布式登录限速。
+
+## 自然月消费与按模型查询
+
+概览、上游密钥和私有密钥提供自然月 Token 费用统计。密钥列表直接显示当月已知费用；点击“更多明细”向下展开各模型的请求次数、输入/输出 Token、输入/输出费用及合计。概览提供总消费展开区。可查询任意日期范围（最多 366 天，包含结束日期），也可切换当月或上月。
+
+`REPORT_TIMEZONE=Asia/Shanghai` 决定自然月、查询日期和 S3 年月路径的时区。月初从该时区第一天 00:00 开始，下月第一天 00:00 结束。统计来自本网关已保存的单价快照，**不是 OpenAI 官方账单**；费用未知的请求单独显示数量，已知部分显示小计，不把缺失价格算成免费。恢复探测不计入客户消费，同一 Response 已去重的 Token 和费用不再次累计；同一请求的重试以请求 UUID 合并请求次数。
+
+管理接口（均需要管理员会话）：
+
+- `GET /admin/api/spending`：当前自然月总消费和模型明细。
+- `GET /admin/api/upstream_keys/{id}/spending`：某个上游 Key 的消费明细。
+- `GET /admin/api/gateway_keys/{id}/spending`：某个私有 Key 的消费明细。
+- 以上接口支持 `?from=2026-10-01&to=2026-10-30`，结束日期包含当天；列表返回 `month_cost`、`month_requests` 和 `month_unknown`。
+
+私有 Key 名称旁提供复制按钮，直接调用已有的受管理员会话和 CSRF 保护的回显接口，并将完整密钥写入剪贴板。旧版只有哈希的 Key 会打开补录页面，不会自动更换密钥。
+
+## 可选 S3 请求 JSON 存储
+
+在 `.env` 设置以下变量，使用已创建的 S3 兼容存储桶；保留四个必填项为空即关闭功能。配置不完整时启动会报配置错误，避免误以为存储已经生效。
+
+```dotenv
+S3_ENDPOINT=https://s3.example.com
+S3_REGION=us-east-1
+S3_BUCKET=ai-gateway
+S3_ACCESS_KEY_ID=replace-with-access-key
+S3_SECRET_ACCESS_KEY=replace-with-secret-key
+S3_SESSION_TOKEN=
+S3_FORCE_PATH_STYLE=true
+REPORT_TIMEZONE=Asia/Shanghai
+```
+
+支持 Amazon S3、MinIO 及提供兼容接口的对象存储。`S3_ENDPOINT` 使用 HTTP(S) 的服务根地址，不包含桶名、子路径、查询参数或嵌入的凭据；生产部署使用 HTTPS。需要时将 `S3_FORCE_PATH_STYLE=false` 切换为桶域名访问。修改环境后执行 `docker compose up -d gateway` 重新创建容器。
+
+- **未配置 S3**：设置页没有 S3 区块，私钥没有 JSON 存储开关，保持只保存元数据。
+- **配置 S3**：设置页展示服务地址、区域和桶名，隐藏访问密钥。点击“测试写入与读取”会向 `_gateway-tests/<UUID>.json` 写入测试 JSON、读回比对并尝试删除测试对象；测试接口 `POST /admin/api/storage/test` 要求管理员会话及 CSRF。权限至少需要桶内对象的 PutObject、GetObject，测试清理另需 DeleteObject。
+- 私有 Key 的“JSON 存储配置”（新建/编辑也可设置）分别控制 `store_input`、`store_output`，默认都关闭。配置 S3 **不会自动启用任何私钥的正文存储**。在这里开启后，请求正文会发送到你配置的存储桶。
+- 路径为 `私钥name/YYYY-MM/请求UUID-in.json`、`私钥name/YYYY-MM/请求UUID-out.json`。年月按请求开始时间及 `REPORT_TIMEZONE` 计算，重命名私钥后，历史文件保留旧路径；旧版名称中不适合作为单一路径段的字符会替换为连字符。
+- `X-Gateway-Request-ID` 响应头、调用记录 `request_uuid` 和 S3 对象文件名一致。每条新的调用记录 `id` 也使用 UUID；多个上游重试记录共用一个 `request_uuid`，归档保留客户端输入及最终响应。
+- 普通有效 JSON 保留原始正文。SSE 输出保存为 JSON 包装：`{"format":"sse","data":"原始 SSE 文本","complete":true,"status":200,"request_uuid":"..."}`；中断时 `complete=false`，不会改变向客户端传输的 SSE 字节。无 JSON 正文的请求/响应使用同类包装。认证头、Cookie 和其它 HTTP 头不会写入对象。
+- 单方向最多捕获 32 MiB；超限不上传截断内容，记录状态“超过 32 MiB，未存储”。S3 失败不重放模型调用，也不修改客户端响应；归档在响应刷出后进行有超时的尽力写入，进程中断或失败不会自动重试。调用记录展示输入/输出对象路径及各自状态（待写入、已存储、失败等）。
+
+迁移 `010_storage_and_spend.sql` 增加开关、请求 UUID、对象路径/状态与消费查询索引；PostgreSQL 不保存对话正文。旧记录不回填 UUID 或 S3 文件。删除私钥保留历史调用与 S3 对象，存储桶保留期限由桶生命周期策略管理；数据库备份不包含 S3 对象。

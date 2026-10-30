@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -216,7 +217,11 @@ func (a *App) persistRecord(ctx context.Context, k GatewayKey, u Upstream, metho
 	if k.IP.IsValid() {
 		ip = k.IP.String()
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO request_logs(id,gateway_key_id,upstream_key_id,model,method,endpoint,ip,status,error_code,duration_ms,input_tokens,output_tokens,cached_tokens,response_id,attempt,kind,platform,usage_known,cached_tokens_known,cache_write_tokens,usage_accounting,pricing_status,pricing_snapshot,input_cost,output_cost,cached_input_cost,total_cost,cache_write_cost) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::numeric,$25::numeric,$26::numeric,$27::numeric,$28::numeric)`, newID(), keyID, upstreamID, u.Model, method, path, ip, status, code, time.Since(start).Milliseconds(), usage.Input, usage.Output, usage.Cached, responseID, attempt, kind, platform, usage.InputKnown && usage.OutputKnown, usage.CachedKnown, usage.CacheWrite, accounting, cost.Status, snapshot, cost.Input, cost.Output, cost.Cached, cost.Total, cost.Write)
+	requestUUID := k.RequestUUID
+	if requestUUID == "" {
+		requestUUID = uuid.NewString()
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO request_logs(id,gateway_key_id,upstream_key_id,model,method,endpoint,ip,status,error_code,duration_ms,input_tokens,output_tokens,cached_tokens,response_id,attempt,kind,platform,usage_known,cached_tokens_known,cache_write_tokens,usage_accounting,pricing_status,pricing_snapshot,input_cost,output_cost,cached_input_cost,total_cost,cache_write_cost,request_uuid) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::numeric,$25::numeric,$26::numeric,$27::numeric,$28::numeric,$29::uuid)`, uuid.NewString(), keyID, upstreamID, u.Model, method, path, ip, status, code, time.Since(start).Milliseconds(), usage.Input, usage.Output, usage.Cached, responseID, attempt, kind, platform, usage.InputKnown && usage.OutputKnown, usage.CachedKnown, usage.CacheWrite, accounting, cost.Status, snapshot, cost.Input, cost.Output, cost.Cached, cost.Total, cost.Write, requestUUID)
 	if err != nil {
 		return err
 	}

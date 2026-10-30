@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,17 @@ type Config struct {
 	TrustedProxies                                  []netip.Prefix
 	UpstreamURL                                     string // Only injected by tests; production is fixed to api.openai.com.
 	RequestTimeout                                  time.Duration
+	ReportTimezone                                  string
+	S3                                              S3Config
+}
+
+type S3Config struct {
+	Endpoint, Region, Bucket, AccessKey, SecretKey, SessionToken string
+	PathStyle                                                    bool
+}
+
+func (c S3Config) Enabled() bool {
+	return c.Endpoint != "" && c.Bucket != "" && c.AccessKey != "" && c.SecretKey != ""
 }
 
 func LoadConfig() (Config, error) {
@@ -45,6 +57,20 @@ func LoadConfig() (Config, error) {
 			return c, errors.New("invalid REQUEST_TIMEOUT_SECONDS")
 		}
 		c.RequestTimeout = time.Duration(n) * time.Second
+	}
+	c.ReportTimezone = env("REPORT_TIMEZONE", "Asia/Shanghai")
+	if _, err := time.LoadLocation(c.ReportTimezone); err != nil {
+		return c, errors.New("invalid REPORT_TIMEZONE")
+	}
+	c.S3 = S3Config{Endpoint: strings.TrimSpace(os.Getenv("S3_ENDPOINT")), Region: env("S3_REGION", "us-east-1"), Bucket: strings.TrimSpace(os.Getenv("S3_BUCKET")), AccessKey: os.Getenv("S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("S3_SECRET_ACCESS_KEY"), SessionToken: os.Getenv("S3_SESSION_TOKEN"), PathStyle: env("S3_FORCE_PATH_STYLE", "true") == "true"}
+	if c.S3.Endpoint != "" || c.S3.Bucket != "" || c.S3.AccessKey != "" || c.S3.SecretKey != "" {
+		if !c.S3.Enabled() {
+			return c, errors.New("S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together")
+		}
+		u, err := url.Parse(c.S3.Endpoint)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return c, errors.New("invalid S3_ENDPOINT: use an http(s) origin without a path or credentials")
+		}
 	}
 	return c, nil
 }

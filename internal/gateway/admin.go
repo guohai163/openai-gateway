@@ -22,6 +22,8 @@ type resourceInput struct {
 	Models        *[]string `json:"models"`
 	CIDRs         *[]string `json:"cidrs"`
 	ExpiresInDays *int      `json:"expires_in_days"`
+	StoreInput    *bool     `json:"store_input"`
+	StoreOutput   *bool     `json:"store_output"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -29,6 +31,14 @@ var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
 func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/"), "/"), "/")
 	resource := parts[0]
+	if resource == "spending" && len(parts) == 1 && r.Method == "GET" {
+		a.spending(w, r, "", "")
+		return
+	}
+	if resource == "storage" && len(parts) == 2 && parts[1] == "test" && r.Method == "POST" {
+		a.storageTest(w, r)
+		return
+	}
 	if resource == "pricing" {
 		a.pricingAdmin(w, r, parts)
 		return
@@ -52,7 +62,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 503, "database_unavailable")
 			return
 		}
-		writeJSON(w, 200, map[string]string{"username": name, "csrf": w.Header().Get("X-CSRF-Token")})
+		writeJSON(w, 200, map[string]any{"username": name, "csrf": w.Header().Get("X-CSRF-Token"), "storage_enabled": a.Storage != nil})
 		return
 	}
 	if resource == "logout" && r.Method == "POST" {
@@ -75,7 +85,15 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		for _, p := range a.Config.TrustedProxies {
 			proxies = append(proxies, p.String())
 		}
-		writeJSON(w, 200, map[string]any{"upstream": "https://api.openai.com", "trusted_proxies": proxies, "secure_cookies": a.Config.SecureCookies, "model_sync_minutes": 10, "probe_initial_minutes": 5, "probe_max_minutes": 60, "request_timeout_seconds": a.Config.RequestTimeout.Seconds()})
+		settings := map[string]any{"upstream": "https://api.openai.com", "trusted_proxies": proxies, "secure_cookies": a.Config.SecureCookies, "model_sync_minutes": 10, "probe_initial_minutes": 5, "probe_max_minutes": 60, "request_timeout_seconds": a.Config.RequestTimeout.Seconds(), "report_timezone": a.reportLocation().String()}
+		if a.Storage != nil {
+			settings["storage"] = map[string]any{"endpoint": a.Config.S3.Endpoint, "bucket": a.Config.S3.Bucket, "region": a.Config.S3.Region}
+		}
+		writeJSON(w, 200, settings)
+		return
+	}
+	if len(parts) == 3 && parts[2] == "spending" && r.Method == "GET" {
+		a.spending(w, r, resource, parts[1])
 		return
 	}
 	if len(parts) == 3 {
@@ -167,7 +185,7 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	queries := map[string]string{
 		"upstream_keys": `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
 		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
-		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
+		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name,a.input_path,a.output_path,a.input_status,a.output_status FROM request_logs l LEFT JOIN request_archives a ON a.request_uuid=l.request_uuid LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
 		"audit":         `SELECT * FROM audit_logs ORDER BY created_at DESC`,
 		"models":        `SELECT DISTINCT model FROM models ORDER BY model`,
 		"cooldowns":     `SELECT * FROM cooldowns WHERE until_at>now() ORDER BY until_at DESC`,
@@ -187,7 +205,13 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	}
 	args := []any{limit, offset}
 	var b []byte
-	e := a.DB.QueryRow(r.Context(), "SELECT coalesce(json_agg(t),'[]'::json) FROM ("+q+" LIMIT $1 OFFSET $2) t", args...).Scan(&b)
+	var e error
+	if resource == "upstream_keys" || resource == "gateway_keys" {
+		start, end := a.monthRange()
+		e = a.DB.QueryRow(r.Context(), a.keyMonthlyQuery(resource), limit, offset, start, end).Scan(&b)
+	} else {
+		e = a.DB.QueryRow(r.Context(), "SELECT coalesce(json_agg(t),'[]'::json) FROM ("+q+" LIMIT $1 OFFSET $2) t", args...).Scan(&b)
+	}
 	if e != nil {
 		adminDBError(w, e)
 		return
@@ -246,6 +270,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
+		if (in.StoreInput != nil && *in.StoreInput || in.StoreOutput != nil && *in.StoreOutput) && a.Storage == nil {
+			writeError(w, 400, "storage_not_configured")
+			return
+		}
 		if (create || in.Name != "") && (!privateKeyNamePattern.MatchString(name) || name != in.Name) {
 			writeError(w, 400, "invalid_key_name")
 			return
@@ -316,10 +344,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			var secret []byte
 			secret, e = seal(a.Config.MasterKey, token)
 			if e == nil {
-				tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret)
+				tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false))", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput)
 			}
 		} else {
-			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry)
+			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output) WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput)
 		}
 	default:
 		writeError(w, 404, "not_found")

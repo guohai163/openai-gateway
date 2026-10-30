@@ -28,6 +28,7 @@ type App struct {
 	loginAttempts map[string]loginLimit
 	jobMu         sync.Mutex
 	pricingMu     sync.Mutex
+	Storage       ObjectStorage
 }
 type loginLimit struct {
 	Count int
@@ -44,6 +45,13 @@ func New(ctx context.Context, c Config) (*App, error) {
 		return nil, e
 	}
 	a := &App{DB: db, Config: c, rr: map[string]uint64{}, loginAttempts: map[string]loginLimit{}}
+	if c.S3.Enabled() {
+		a.Storage, e = newS3Storage(c.S3)
+		if e != nil {
+			db.Close()
+			return nil, e
+		}
+	}
 	a.Client = &http.Client{Timeout: c.RequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 100, MaxIdleConnsPerHost: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 2 * time.Minute, ForceAttemptHTTP2: true}}
 	if e = a.migrate(ctx); e != nil {
 		db.Close()

@@ -37,6 +37,8 @@ import {
 } from "./theme.mjs";
 import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
+import { SpendingDetails, usd } from "./SpendingDetails";
+import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
 import "./style.css";
 type Row = Record<string, any>;
@@ -115,6 +117,8 @@ function App() {
     [copied, setCopied] = useState(false),
     [offset, setOffset] = useState(0),
     [query, setQuery] = useState("");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null),
+    [keyCopied, setKeyCopied] = useState<string | null>(null);
   useEffect(() => {
     const fn = () => setBrowser(navigator.languages);
     addEventListener("languagechange", fn);
@@ -150,10 +154,13 @@ function App() {
           : page === "settings"
             ? "settings"
             : page + "?" + q;
-      const [catalog, result] = await Promise.all([
+      const settingsPromise = api("settings");
+      const [catalog, result, configuration] = await Promise.all([
         fetchAllModels(api),
-        api(path),
+        page === "settings" ? settingsPromise : api(path),
+        settingsPromise,
       ]);
+      setSettings(configuration);
       setModels(catalog);
       if (page === "overview") setDashboard(result);
       else if (page === "settings") setSettings(result);
@@ -231,6 +238,10 @@ function App() {
     const input: Row = Object.fromEntries(form);
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
+      if (settings.storage) {
+        input.store_input = form.has("store_input");
+        input.store_output = form.has("store_output");
+      }
       input.models = form.getAll("models");
       if (!input.models.length) {
         setError("models_required");
@@ -420,18 +431,28 @@ function App() {
   const columns: Record<string, string[]> = {
     upstream_keys: [
       "name",
+      "month_cost",
       "models",
       "status",
       "model_synced_at",
       "next_probe_at",
     ],
-    gateway_keys: ["name", "models", "cidrs", "status", "expires_at"],
+    gateway_keys: [
+      "name",
+      "month_cost",
+      "models",
+      "cidrs",
+      "status",
+      "expires_at",
+    ],
     logs: [
       "created_at",
       "model",
       "status",
       "token_usage",
       "request_cost",
+      "request_uuid",
+      "archive_status",
       "ip",
       "duration_ms",
       "gateway_name",
@@ -444,6 +465,46 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "month_cost")
+      return (
+        <button
+          className="key-spend-button"
+          type="button"
+          aria-expanded={expandedKey === r.id}
+          onClick={() => setExpandedKey(expandedKey === r.id ? null : r.id)}
+        >
+          <strong>
+            {Number(r.month_requests) === 0
+              ? usd(0, locale)
+              : r.month_cost == null
+                ? t("unknown")
+                : usd(r.month_cost, locale)}
+          </strong>
+          <small>
+            {t("currentCalendarMonth")}
+            {r.month_unknown > 0 ? " · " + t("partialEstimate") : ""}
+          </small>
+          <span>{t(expandedKey === r.id ? "lessDetails" : "moreDetails")}</span>
+        </button>
+      );
+    if (c === "request_uuid") return <code title={v}>{v || "—"}</code>;
+    if (c === "archive_status")
+      return r.input_status || r.output_status ? (
+        <div className="archive-status">
+          <small>
+            {t("archiveInput")}:{" "}
+            {t("archive_" + (r.input_status || "disabled"))}
+          </small>
+          <small>
+            {t("archiveOutput")}:{" "}
+            {t("archive_" + (r.output_status || "disabled"))}
+          </small>
+          {r.input_path && <code title={r.input_path}>{r.input_path}</code>}
+          {r.output_path && <code title={r.output_path}>{r.output_path}</code>}
+        </div>
+      ) : (
+        "—"
+      );
     if (c === "token_usage")
       return <RequestTokens row={r} locale={locale} t={t} />;
     if (c === "request_cost")
@@ -492,7 +553,36 @@ function App() {
       return (
         <div className="resource-name">
           <strong>{v}</strong>
-          <small>{r.prefix ? r.prefix + "…" : ""}</small>
+          <div className="key-prefix">
+            <small>{r.prefix ? r.prefix + "…" : ""}</small>
+            {page === "gateway_keys" && (
+              <button
+                type="button"
+                title={t(keyCopied === r.id ? "copied" : "copy")}
+                aria-label={t(keyCopied === r.id ? "copied" : "copy")}
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    const result = await api(`gateway_keys/${r.id}/reveal`, {
+                      method: "POST",
+                      body: "{}",
+                    });
+                    await navigator.clipboard.writeText(result.key);
+                    setKeyCopied(r.id);
+                  } catch (error) {
+                    if (
+                      error instanceof Error &&
+                      error.message === "key_not_recoverable"
+                    )
+                      setUsage({ ...r, initialKey: "" });
+                    else fail(error);
+                  }
+                }}
+              >
+                {keyCopied === r.id ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            )}
+          </div>
         </div>
       );
     return v || "—";
@@ -703,6 +793,7 @@ function App() {
                   ))}
                 </section>
               </div>
+              <SpendingDetails api={api} t={t} locale={locale} />
               <OverviewAnalytics
                 hourly={dashboard.hourly || []}
                 models={dashboard.models || []}
@@ -741,20 +832,25 @@ function App() {
                   <Settings size={18} />
                 </div>
                 <div className="settings-list">
-                  {Object.entries(settings).map(([k, v]) => (
-                    <div key={k}>
-                      <span>{t(k)}</span>
-                      <code>
-                        {typeof v === "boolean"
-                          ? t(v ? "on" : "off")
-                          : Array.isArray(v)
-                            ? v.join(", ") || "—"
-                            : String(v)}
-                      </code>
-                    </div>
-                  ))}
+                  {Object.entries(settings)
+                    .filter(([k]) => k !== "storage")
+                    .map(([k, v]) => (
+                      <div key={k}>
+                        <span>{t(k)}</span>
+                        <code>
+                          {typeof v === "boolean"
+                            ? t(v ? "on" : "off")
+                            : Array.isArray(v)
+                              ? v.join(", ") || "—"
+                              : String(v)}
+                        </code>
+                      </div>
+                    ))}
                 </div>
               </section>
+              {settings.storage && (
+                <StorageSettings storage={settings.storage} api={api} t={t} />
+              )}
               <section className="privacy">
                 <ShieldCheck size={24} />
                 <div>
@@ -803,99 +899,126 @@ function App() {
                             .includes(query.toLowerCase()),
                       )
                       .map((r, i) => (
-                        <tr key={r.id || i}>
-                          {columns[page]?.map((c) => (
-                            <td key={c}>{cell(c, r)}</td>
-                          ))}
-                          {canAdd && (
-                            <td className="actions-column">
-                              <div className="row-actions">
-                                <button
-                                  onClick={() => {
-                                    setModal(r);
-                                    setError("");
-                                  }}
-                                >
-                                  {t("edit")}
-                                </button>
-                                {page === "gateway_keys" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setUsage({
-                                          ...r,
-                                          initialKey: "",
-                                          showKey: true,
-                                        })
-                                      }
-                                    >
-                                      <Eye size={14} />
-                                      {t("revealKey")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setUsage({ ...r, initialKey: "" })
-                                      }
-                                    >
-                                      {t("howToUse")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="danger-link"
-                                      disabled={busy}
-                                      onClick={() => {
-                                        setError("");
-                                        setDeleteTarget(r);
-                                      }}
-                                    >
-                                      {t("delete")}
-                                    </button>
-                                  </>
-                                )}
-                                {page === "upstream_keys" && (
-                                  <>
-                                    <button
-                                      disabled={busy}
-                                      onClick={() => action(r.id, "refresh")}
-                                    >
-                                      {t("refresh")}
-                                    </button>
-                                    {r.invalid && (
+                        <React.Fragment key={r.id || i}>
+                          <tr>
+                            {columns[page]?.map((c) => (
+                              <td key={c}>{cell(c, r)}</td>
+                            ))}
+                            {canAdd && (
+                              <td className="actions-column">
+                                <div className="row-actions">
+                                  <button
+                                    onClick={() => {
+                                      setModal(r);
+                                      setError("");
+                                    }}
+                                  >
+                                    {t("edit")}
+                                  </button>
+                                  {page === "gateway_keys" && (
+                                    <>
                                       <button
-                                        disabled={busy}
+                                        type="button"
                                         onClick={() =>
-                                          action(r.id, "reset_auth")
+                                          setUsage({
+                                            ...r,
+                                            initialKey: "",
+                                            showKey: true,
+                                          })
                                         }
                                       >
-                                        {t("reset_auth")}
+                                        <Eye size={14} />
+                                        {t("revealKey")}
                                       </button>
-                                    )}
-                                  </>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setUsage({ ...r, initialKey: "" })
+                                        }
+                                      >
+                                        {t("howToUse")}
+                                      </button>
+                                      {settings.storage && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setModal(r);
+                                            setError("");
+                                          }}
+                                        >
+                                          {t("configureStorage")}
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="danger-link"
+                                        disabled={busy}
+                                        onClick={() => {
+                                          setError("");
+                                          setDeleteTarget(r);
+                                        }}
+                                      >
+                                        {t("delete")}
+                                      </button>
+                                    </>
+                                  )}
+                                  {page === "upstream_keys" && (
+                                    <>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => action(r.id, "refresh")}
+                                      >
+                                        {t("refresh")}
+                                      </button>
+                                      {r.invalid && (
+                                        <button
+                                          disabled={busy}
+                                          onClick={() =>
+                                            action(r.id, "reset_auth")
+                                          }
+                                        >
+                                          {t("reset_auth")}
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                  {r.quota_blocked && (
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => action(r.id, "probe")}
+                                    >
+                                      {t("probe")}
+                                    </button>
+                                  )}
+                                </div>
+                                {r.model_sync_error && (
+                                  <small className="error-hint">
+                                    {t(r.model_sync_error)}
+                                  </small>
                                 )}
-                                {r.quota_blocked && (
-                                  <button
-                                    disabled={busy}
-                                    onClick={() => action(r.id, "probe")}
-                                  >
-                                    {t("probe")}
-                                  </button>
+                                {r.last_error && (
+                                  <small className="error-hint">
+                                    {r.last_error}
+                                  </small>
                                 )}
-                              </div>
-                              {r.model_sync_error && (
-                                <small className="error-hint">
-                                  {t(r.model_sync_error)}
-                                </small>
-                              )}
-                              {r.last_error && (
-                                <small className="error-hint">
-                                  {r.last_error}
-                                </small>
-                              )}
-                            </td>
+                              </td>
+                            )}
+                          </tr>
+                          {canAdd && expandedKey === r.id && (
+                            <tr className="key-spending-row">
+                              <td colSpan={(columns[page]?.length || 0) + 1}>
+                                <SpendingDetails
+                                  api={api}
+                                  t={t}
+                                  locale={locale}
+                                  resource={page}
+                                  resourceId={r.id}
+                                  compact
+                                />
+                              </td>
+                            </tr>
                           )}
-                        </tr>
+                        </React.Fragment>
                       ))}
                   </tbody>
                 </table>
@@ -978,6 +1101,28 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
+                    {settings.storage && (
+                      <fieldset className="archive-preferences">
+                        <legend>{t("storePayloads")}</legend>
+                        <p>{t("storePayloadsHint")}</p>
+                        <label>
+                          <input
+                            type="checkbox"
+                            name="store_input"
+                            defaultChecked={!!modal.store_input}
+                          />
+                          {t("storeInputJSON")}
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            name="store_output"
+                            defaultChecked={!!modal.store_output}
+                          />
+                          {t("storeOutputJSON")}
+                        </label>
+                      </fieldset>
+                    )}
                     <ModelMultiSelect
                       models={models.map((row) => row.model)}
                       defaultValue={modal.models || ["*"]}

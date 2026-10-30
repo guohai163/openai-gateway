@@ -1873,3 +1873,166 @@ tbody tr:hover .actions-column {
     flex-wrap: wrap;
   }
 }
+.monthly-spending {
+  margin: 16px 0;
+  padding: 22px;
+}
+.monthly-spending-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.monthly-spending-heading strong {
+  display: block;
+  margin: 10px 0;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+.monthly-spending-heading small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.spending-expanded {
+  margin-top: 18px;
+}
+.spending-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.spending-range label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+}
+.spending-range input {
+  width: 155px;
+}
+.spending-totals {
+  margin: 18px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.spend-partial {
+  color: var(--warning);
+}
+.spending-models small {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+}
+.spending-note {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 15px;
+}
+.spending-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 20px 0;
+}
+.key-spend-button {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  padding: 0;
+  background: none;
+  text-align: left;
+  white-space: normal;
+}
+.key-spend-button strong {
+  color: var(--positive);
+  font-weight: 500;
+  font-size: 15px;
+}
+.key-spend-button small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.key-spend-button > span {
+  font-size: 11px;
+  color: var(--faint);
+}
+.key-spending-row > td {
+  padding: 0 22px 22px;
+  background: var(--subtle);
+}
+.key-prefix {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.key-prefix button {
+  padding: 3px;
+  background: none;
+  color: var(--muted);
+}
+.key-prefix button:hover {
+  color: var(--text);
+  background: var(--hover);
+  border-radius: 4px;
+}
+.storage-settings {
+  padding: 22px;
+  margin-top: 16px;
+}
+.storage-test {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-top: 20px;
+}
+.storage-test p {
+  font-size: 12px;
+}
+.archive-preferences {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 15px;
+}
+.archive-preferences legend {
+  padding: 0 5px;
+}
+.archive-preferences p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+.archive-preferences label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 8px 0;
+  gap: 8px;
+}
+.archive-preferences input {
+  width: auto;
+}
+.archive-status {
+  display: grid;
+  gap: 5px;
+  max-width: 220px;
+}
+.archive-status small {
+  font-size: 11px;
+}
+.archive-status code {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+@media (max-width: 650px) {
+  .monthly-spending-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .monthly-spending {
+    padding: 16px;
+  }
+}
