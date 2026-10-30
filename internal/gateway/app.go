@@ -20,15 +20,16 @@ import (
 var migrations embed.FS
 
 type App struct {
-	DB            *pgxpool.Pool
-	Config        Config
-	Client        *http.Client
-	mu            sync.Mutex
-	rr            map[string]uint64
-	loginAttempts map[string]loginLimit
-	jobMu         sync.Mutex
-	pricingMu     sync.Mutex
-	Storage       ObjectStorage
+	DB                *pgxpool.Pool
+	Config            Config
+	Client            *http.Client
+	mu                sync.Mutex
+	rr                map[string]uint64
+	loginAttempts     map[string]loginLimit
+	jobMu             sync.Mutex
+	pricingMu         sync.Mutex
+	Storage           ObjectStorage
+	IPLookupTransport http.RoundTripper // Optional transport injection for isolated tests.
 }
 type loginLimit struct {
 	Count int

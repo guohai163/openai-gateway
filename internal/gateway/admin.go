@@ -108,6 +108,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 {
+		if resource == "logs" && parts[2] == "ip_lookup" && r.Method == "POST" {
+			a.lookupLogIP(w, r, parts[1])
+			return
+		}
 		if resource == "gateway_keys" && parts[2] == "reveal" && r.Method == "POST" {
 			a.revealGatewayKey(w, r, parts[1])
 			return

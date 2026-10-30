@@ -37,6 +37,7 @@ import {
 } from "./theme.mjs";
 import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
+import { ClientIPDetails } from "./ClientIPDetails";
 import { SpendingDetails, usd } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
@@ -478,6 +479,8 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "ip" && page === "logs")
+      return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
     if (c === "month_cost")
       return (
         <button

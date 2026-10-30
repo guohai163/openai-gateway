@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/gyai-icon.png)
 
-最新版本：[v1.7.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.7.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.7.0`。
+最新版本：[v1.8.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.8.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.8.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -267,6 +267,8 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 ## 调用记录：费用与缓存
 
+- 请求 IP 后提供“查询”按钮，点击才由服务端请求 `https://ipconfig.io/json?ip=日志IP`，在当前 IP 下展示 `country`、`city`、`asn`、`asn_org`。管理员可查询全部记录，普通用户仅可查询自己的记录；公网 IP 会发送给该第三方服务，结果作为归属参考，不保存到数据库、不自动批量查询。内网、本地及共享地址直接标记，不发送到外部。
+- IP 查询接口为 `POST /admin/api/logs/{id}/ip_lookup`，请求体 `{}`，需要正式会话和 CSRF。服务端从有权访问的日志读取 IP，不接受调用者覆盖 IP 或目标 URL；不向第三方转发网关认证头或 Cookie。请求限时 8 秒、响应限 64 KiB，不跟随重定向；失败可手动重试，缺失字段显示 `—`。
 - 输入 Token 使用绿色向下箭头、输出 Token 使用紫色向上箭头；展示各自金额及合计。点击费用旁的信息图标，展开本次调用的单位价格、缓存费用和长上下文档位。
 - 价格按请求的 `(platform, model)` 精确匹配并保存快照；实际返回模型 ID 也会保留。金额使用 `NUMERIC(30,16)`，计算过程不使用浮点数。后续同步单价不会修改历史金额。
 - 输入费用 = 普通输入 Token × 输入单价 + 缓存读取 Token × 缓存输入单价 + 各有效期缓存写入 Token × 对应写入单价，再除以一百万；输出费用按输出 Token 和对应档位输出单价计算。缓存 Token 包含在总输入中，不会重复计费。长上下文阈值使用总输入 Token（含缓存），超过阈值后输入和输出均使用长上下文单价。

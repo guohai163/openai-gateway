@@ -2083,3 +2083,42 @@ tbody tr:hover .actions-column {
   display: grid;
   gap: 7px;
 }
+
+.client-ip-details {
+  min-width: 155px;
+  max-width: 300px;
+}
+.client-ip-query {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.client-ip-query button {
+  gap: 4px;
+  font-size: 11px;
+}
+.client-ip-result {
+  margin: 12px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+}
+.client-ip-result > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+}
+.client-ip-result dt {
+  color: var(--faint);
+}
+.client-ip-result dd {
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.client-ip-details > small {
+  display: block;
+  margin-top: 8px;
+  white-space: normal;
+}

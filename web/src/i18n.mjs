@@ -4,6 +4,13 @@ export function resolveLanguage(preference, languages = ["en"]) {
 }
 export const messages = {
   en: {
+    lookupIP: "Lookup",
+    localIP: "Local / private address",
+    ip_country: "Country",
+    ip_city: "City",
+    ip_asn: "ASN",
+    ip_asn_org: "ASN organization",
+    ip_lookup_failed: "IP lookup failed. Please try again.",
     userKeysHint:
       "Manage your own private keys and spending. Up to 3 undeleted keys per user.",
     defaultUserIPHint:
@@ -410,6 +417,13 @@ export const messages = {
     model_sync_error: "Model sync status",
   },
   zh: {
+    lookupIP: "查询",
+    localIP: "内网 / 本地地址",
+    ip_country: "国家",
+    ip_city: "城市",
+    ip_asn: "ASN",
+    ip_asn_org: "ASN 组织",
+    ip_lookup_failed: "IP 查询失败，请稍后重试。",
     userKeysHint: "管理自己的私钥和消费情况，最多保留 3 个未删除私钥。",
     defaultUserIPHint: "已填写当前具体 IP {ip}，可手动添加限定 CIDR。",
     userCIDRHint:
