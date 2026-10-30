@@ -184,16 +184,9 @@ func TestAdminCRUDAndSecrets(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("login %d %s", status, b)
 	}
-	// Use a second login to capture the actual session cookie.
-	req, _ := http.NewRequest("POST", srv.URL+"/admin/api/login", strings.NewReader(`{"username":"admin","password":"test-password-123"}`))
-	resp, e := http.DefaultClient.Do(req)
-	if e != nil {
-		t.Fatal(e)
-	}
-	var login map[string]string
-	_ = json.NewDecoder(resp.Body).Decode(&login)
-	resp.Body.Close()
-	cookie := resp.Cookies()[0]
+	authenticated := testAdminLogin(t, srv.URL)
+	cookie := authenticated.cookie
+	login := map[string]string{"csrf": authenticated.csrf}
 	adminReq := func(method, path, body string, withCSRF bool) (int, []byte) {
 		req, _ := http.NewRequest(method, srv.URL+"/admin/api/"+path, strings.NewReader(body))
 		req.AddCookie(cookie)

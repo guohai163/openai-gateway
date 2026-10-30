@@ -202,14 +202,11 @@ func TestModelDiscoveryCreatesUnpricedRowsAndProjectsRemoved(t *testing.T) {
 		t.Fatal("new catalog model has no missing-price row", status, e)
 	}
 	// The authenticated admin API no longer exposes project management.
-	req, _ := http.NewRequest("POST", srv.URL+"/admin/api/login", strings.NewReader(`{"username":"admin","password":"test-password-123"}`))
-	resp, e := http.DefaultClient.Do(req)
-	if e != nil {
-		t.Fatal(e)
-	}
-	cookie := resp.Cookies()[0]
-	resp.Body.Close()
-	req, _ = http.NewRequest("GET", srv.URL+"/admin/api/projects", nil)
+	authenticated := testAdminLogin(t, srv.URL)
+	cookie := authenticated.cookie
+	var resp *http.Response
+	var e error
+	req, _ := http.NewRequest("GET", srv.URL+"/admin/api/projects", nil)
 	req.AddCookie(cookie)
 	resp, e = http.DefaultClient.Do(req)
 	if e != nil {

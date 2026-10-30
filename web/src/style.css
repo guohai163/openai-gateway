@@ -2045,3 +2045,41 @@ tbody tr:hover .actions-column {
     padding: 16px;
   }
 }
+
+.otp-enrollment {
+  display: grid;
+  gap: 14px;
+  justify-items: stretch;
+}
+.otp-enrollment img {
+  width: 220px;
+  max-width: 100%;
+  justify-self: center;
+  border-radius: 8px;
+}
+.otp-enrollment small {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.account-panel {
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.account-panel h2 {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
+.account-panel p {
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+.account-form {
+  display: grid;
+  gap: 18px;
+  max-width: 420px;
+}
+.account-form label {
+  display: grid;
+  gap: 7px;
+}

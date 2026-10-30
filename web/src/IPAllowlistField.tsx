@@ -7,9 +7,16 @@ type Props = {
     path: string,
   ) => Promise<{ client_ip: string; default_cidr: string }>;
   t: (key: string) => string;
+  restricted?: boolean;
 };
 
-export function IPAllowlistField({ editing, savedCIDRs, request, t }: Props) {
+export function IPAllowlistField({
+  editing,
+  savedCIDRs,
+  request,
+  t,
+  restricted = false,
+}: Props) {
   const [value, setValue] = useState(() => savedCIDRs?.join("\n") || "");
   const [loading, setLoading] = useState(!editing);
   const [sourceIP, setSourceIP] = useState("");
@@ -58,10 +65,10 @@ export function IPAllowlistField({ editing, savedCIDRs, request, t }: Props) {
           setFailed(false);
         }}
       />
-      <small>{t("cidrHint")}</small>
+      <small>{t(restricted ? "userCIDRHint" : "cidrHint")}</small>
       {zeroHostOnly && (
         <small className="cidr-scope-hint" role="status">
-          {t("zeroHostCIDRHint")}
+          {t(restricted ? "specific_ip_required" : "zeroHostCIDRHint")}
         </small>
       )}
       {!editing && (loading || failed || sourceIP) && (
@@ -70,7 +77,10 @@ export function IPAllowlistField({ editing, savedCIDRs, request, t }: Props) {
             ? t("detectingClientIP")
             : failed
               ? t("client_ip_unavailable")
-              : t("defaultCIDRHint").replace("{ip}", sourceIP)}
+              : t(restricted ? "defaultUserIPHint" : "defaultCIDRHint").replace(
+                  "{ip}",
+                  sourceIP,
+                )}
         </small>
       )}
     </label>

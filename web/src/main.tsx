@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -40,6 +40,8 @@ import { RequestTokens, RequestCost } from "./RequestUsage";
 import { SpendingDetails, usd } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
+import { LoginForm } from "./LoginForm";
+import { UserManagement, AccountSettings } from "./UserManagement";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -49,9 +51,12 @@ type Page =
   | "gateway_keys"
   | "logs"
   | "settings"
-  | "audit";
+  | "audit"
+  | "users"
+  | "account";
 let csrf = "";
 async function api(path: string, options: RequestInit = {}) {
+  const sentCSRF = csrf;
   let res: Response;
   try {
     res = await fetch("/admin/api/" + path, {
@@ -66,8 +71,9 @@ async function api(path: string, options: RequestInit = {}) {
     throw Error("network_error");
   }
   const token = res.headers.get("X-CSRF-Token");
-  if (token) csrf = token;
+  if (token && csrf === sentCSRF) csrf = token;
   const v = await res.json().catch(() => ({}));
+  if (v.csrf && (csrf === sentCSRF || csrf === token)) csrf = v.csrf;
   if (!res.ok) throw Error(v.error?.code || "unexpected_error");
   return v;
 }
@@ -103,6 +109,8 @@ function App() {
     [data, setData] = useState<Row[]>([]),
     [dashboard, setDashboard] = useState<Row>({}),
     [settings, setSettings] = useState<Row>({});
+  const [identity, setIdentity] = useState<Row>({});
+  const isAdmin = identity.role === "admin";
   const [models, setModels] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
@@ -119,6 +127,55 @@ function App() {
     [query, setQuery] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null),
     [keyCopied, setKeyCopied] = useState<string | null>(null);
+  const sessionGeneration = useRef(0);
+  const authChannel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("gyai-auth");
+    authChannel.current = channel;
+    channel.onmessage = () => window.location.reload();
+    return () => {
+      authChannel.current = null;
+      channel.close();
+    };
+  }, []);
+  function clearAccountData() {
+    sessionGeneration.current++;
+    setData([]);
+    setDashboard({});
+    setSettings({});
+    setModels([]);
+    setModal(null);
+    setCatalog(null);
+    setUsage(null);
+    setDeleteTarget(null);
+    setNewKeyInfo(null);
+    setSecret("");
+    setExpandedKey(null);
+    setKeyCopied(null);
+    setOffset(0);
+    setQuery("");
+    setNotice("");
+    setError("");
+  }
+  function signOut() {
+    const hadSession = !!session;
+    clearAccountData();
+    setIdentity({});
+    setSession(null);
+    csrf = "";
+    if (hadSession) {
+      authChannel.current?.postMessage("changed");
+      window.location.reload();
+    }
+  }
+  function acceptSession(v: Row, announce = false) {
+    clearAccountData();
+    setIdentity(v.user);
+    setSession(v.username);
+    setPage(v.user.role === "admin" ? "overview" : "gateway_keys");
+    if (announce) authChannel.current?.postMessage("changed");
+  }
   useEffect(() => {
     const fn = () => setBrowser(navigator.languages);
     addEventListener("languagechange", fn);
@@ -132,18 +189,16 @@ function App() {
   function fail(e: unknown) {
     const code = e instanceof Error ? e.message : "unexpected_error";
     setError(code);
-    if (code === "unauthorized") setSession(null);
+    if (code === "unauthorized") signOut();
   }
   useEffect(() => {
     api("session")
-      .then((v) => {
-        csrf = v.csrf;
-        setSession(v.username);
-      })
-      .catch(() => setSession(null));
+      .then((v) => acceptSession(v))
+      .catch(() => signOut());
   }, []);
   async function load() {
-    if (page === "pricing") return;
+    if (page === "pricing" || page === "users" || page === "account") return;
+    const generation = sessionGeneration.current;
     setLoading(true);
     setError("");
     try {
@@ -154,43 +209,27 @@ function App() {
           : page === "settings"
             ? "settings"
             : page + "?" + q;
-      const settingsPromise = api("settings");
+      const settingsPromise = isAdmin ? api("settings") : Promise.resolve({});
       const [catalog, result, configuration] = await Promise.all([
         fetchAllModels(api),
         page === "settings" ? settingsPromise : api(path),
         settingsPromise,
       ]);
+      if (generation !== sessionGeneration.current) return;
       setSettings(configuration);
       setModels(catalog);
       if (page === "overview") setDashboard(result);
       else if (page === "settings") setSettings(result);
       else setData(result.data);
     } catch (e) {
-      fail(e);
+      if (generation === sessionGeneration.current) fail(e);
     } finally {
-      setLoading(false);
+      if (generation === sessionGeneration.current) setLoading(false);
     }
   }
   useEffect(() => {
     if (session) void load();
   }, [session, page, offset]);
-  async function login(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const v = await api("login", {
-        method: "POST",
-        body: JSON.stringify(Object.fromEntries(new FormData(e.currentTarget))),
-      });
-      csrf = v.csrf;
-      setSession(v.username);
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-  }
   async function action(id: string, name: string) {
     setBusy(true);
     setError("");
@@ -238,7 +277,7 @@ function App() {
     const input: Row = Object.fromEntries(form);
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
-      if (settings.storage) {
+      if (isAdmin && settings.storage) {
         input.store_input = form.has("store_input");
         input.store_output = form.has("store_output");
       }
@@ -375,36 +414,7 @@ function App() {
           {displayControls}
         </header>
         <main className="login-main">
-          <form className="login-card" onSubmit={login}>
-            <h1>{t("loginTitle")}</h1>
-            <p>{t("loginSubtitle")}</p>
-            {alert}
-            <label>
-              {t("username")}
-              <input
-                name="username"
-                required
-                autoComplete="username"
-                autoFocus
-              />
-            </label>
-            <label>
-              {t("password")}
-              <input
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-              />
-            </label>
-            <button className="primary" disabled={busy}>
-              {t(busy ? "loading" : "login")}
-            </button>
-            <span className="login-security">
-              <ShieldCheck size={14} />
-              {t("secure")}
-            </span>
-          </form>
+          <LoginForm api={api} t={t} onLogin={(v) => acceptSession(v, true)} />
         </main>
       </div>
     );
@@ -416,6 +426,8 @@ function App() {
     ["logs", <Activity size={18} />],
     ["audit", <Terminal size={18} />],
     ["settings", <Settings size={18} />],
+    ["users", <ShieldCheck size={18} />],
+    ["account", <KeyRound size={18} />],
   ];
   const canAdd = ["upstream_keys", "gateway_keys"].includes(page);
   const status = (r: Row) =>
@@ -439,6 +451,7 @@ function App() {
     ],
     gateway_keys: [
       "name",
+      ...(isAdmin ? ["owner_email"] : []),
       "month_cost",
       "models",
       "cidrs",
@@ -452,11 +465,11 @@ function App() {
       "token_usage",
       "request_cost",
       "request_uuid",
-      "archive_status",
+      ...(isAdmin ? ["archive_status"] : []),
       "ip",
       "duration_ms",
       "gateway_name",
-      "upstream_name",
+      ...(isAdmin ? ["upstream_name"] : []),
       "endpoint",
       "error_code",
       "kind",
@@ -541,7 +554,11 @@ function App() {
       return (
         <div className="model-tags">
           {(v || []).slice(0, 3).map((s: string) => (
-            <code key={s}>{s}</code>
+            <code key={s}>
+              {c === "models" && s === "*"
+                ? t(isAdmin ? "allModels" : "allPricedModels")
+                : s}
+            </code>
           ))}
           {v?.length > 3 && <small>+{v.length - 3}</small>}
         </div>
@@ -619,31 +636,36 @@ function App() {
         <button
           className="brand-button"
           aria-label={t("brand")}
-          onClick={() => navigate("overview")}
+          onClick={() => navigate(isAdmin ? "overview" : "gateway_keys")}
         >
           {mark}
         </button>
         <div className="sidebar-label">{t("workspace")}</div>
         <nav>
-          {nav.map(([p, icon]) => (
-            <React.Fragment key={p}>
-              {p === "audit" && (
-                <div className="sidebar-label administration">
-                  {t("administration")}
-                </div>
-              )}
-              <button
-                className={page === p ? "selected" : ""}
-                aria-current={page === p ? "page" : undefined}
-                aria-label={t(p)}
-                title={t(p)}
-                onClick={() => navigate(p)}
-              >
-                {icon}
-                <span>{t(p)}</span>
-              </button>
-            </React.Fragment>
-          ))}
+          {nav
+            .filter(
+              ([p]) =>
+                isAdmin || ["gateway_keys", "logs", "account"].includes(p),
+            )
+            .map(([p, icon]) => (
+              <React.Fragment key={p}>
+                {p === "audit" && (
+                  <div className="sidebar-label administration">
+                    {t("administration")}
+                  </div>
+                )}
+                <button
+                  className={page === p ? "selected" : ""}
+                  aria-current={page === p ? "page" : undefined}
+                  aria-label={t(p)}
+                  title={t(p)}
+                  onClick={() => navigate(p)}
+                >
+                  {icon}
+                  <span>{t(p)}</span>
+                </button>
+              </React.Fragment>
+            ))}
         </nav>
         <div className="sidebar-footer">
           <div className="health">
@@ -654,14 +676,14 @@ function App() {
             <div className="avatar">{session[0].toUpperCase()}</div>
             <div>
               <strong>{session}</strong>
-              <small>{t("administration")}</small>
+              <small>{t(isAdmin ? "roleAdmin" : "roleUser")}</small>
             </div>
             <button
               title={t("logout")}
               onClick={async () => {
                 try {
                   await api("logout", { method: "POST" });
-                  setSession(null);
+                  signOut();
                 } catch (e) {
                   fail(e);
                 }
@@ -693,12 +715,14 @@ function App() {
                       ? "settingsHint"
                       : page === "pricing"
                         ? "pricingDescription"
-                        : "subtitle",
+                        : page === "gateway_keys" && !isAdmin
+                          ? "userKeysHint"
+                          : "subtitle",
                 )}
               </p>
             </div>
             <div className="heading-actions">
-              {page !== "pricing" && (
+              {!["pricing", "users", "account"].includes(page) && (
                 <button
                   className="secondary"
                   disabled={loading || busy}
@@ -711,6 +735,9 @@ function App() {
               {canAdd && (
                 <button
                   className="primary"
+                  disabled={
+                    !isAdmin && page === "gateway_keys" && data.length >= 3
+                  }
                   onClick={() => {
                     setModal({});
                     setError("");
@@ -737,8 +764,12 @@ function App() {
               api={api}
               t={t}
               locale={locale}
-              onUnauthorized={() => setSession(null)}
+              onUnauthorized={signOut}
             />
+          ) : page === "users" ? (
+            <UserManagement api={api} t={t} />
+          ) : page === "account" ? (
+            <AccountSettings api={api} t={t} />
           ) : page === "overview" ? (
             <>
               <div className="stats-grid">
@@ -848,7 +879,7 @@ function App() {
                     ))}
                 </div>
               </section>
-              {settings.storage && (
+              {isAdmin && settings.storage && (
                 <StorageSettings storage={settings.storage} api={api} t={t} />
               )}
               <section className="privacy">
@@ -938,7 +969,7 @@ function App() {
                                       >
                                         {t("howToUse")}
                                       </button>
-                                      {settings.storage && (
+                                      {isAdmin && settings.storage && (
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -1101,7 +1132,7 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
-                    {settings.storage && (
+                    {isAdmin && settings.storage && (
                       <fieldset className="archive-preferences">
                         <legend>{t("storePayloads")}</legend>
                         <p>{t("storePayloadsHint")}</p>
@@ -1126,9 +1157,11 @@ function App() {
                     <ModelMultiSelect
                       models={models.map((row) => row.model)}
                       defaultValue={modal.models || ["*"]}
+                      pricedOnly={!isAdmin}
                       t={t}
                     />
                     <IPAllowlistField
+                      restricted={!isAdmin}
                       editing={!!modal.id}
                       savedCIDRs={modal.cidrs}
                       request={api}

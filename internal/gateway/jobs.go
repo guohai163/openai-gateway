@@ -190,5 +190,5 @@ func (a *App) runCycle(ctx context.Context) {
 	runIDs(`SELECT id FROM upstream_keys WHERE enabled AND NOT invalid AND (model_sync_attempted_at IS NULL OR model_sync_attempted_at<now()-interval '10 minutes')`, a.refreshModels)
 	runIDs(`SELECT id FROM upstream_keys WHERE enabled AND NOT invalid AND quota_blocked AND next_probe_at<=now()`, a.probe)
 
-	_, _ = a.DB.Exec(ctx, "DELETE FROM sessions WHERE expires_at<now(); DELETE FROM cooldowns WHERE until_at<now()")
+	_, _ = a.DB.Exec(ctx, "DELETE FROM sessions WHERE expires_at<now(); DELETE FROM login_challenges WHERE expires_at<now(); DELETE FROM cooldowns WHERE until_at<now()")
 }

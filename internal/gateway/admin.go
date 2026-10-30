@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -31,6 +32,13 @@ var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
 func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/"), "/"), "/")
 	resource := parts[0]
+	if !a.userAccess(w, r, parts) {
+		return
+	}
+	if resource == "users" || resource == "account" {
+		a.accountRoutes(w, r, parts)
+		return
+	}
 	if resource == "spending" && len(parts) == 1 && r.Method == "GET" {
 		a.spending(w, r, "", "")
 		return
@@ -50,19 +58,22 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		bits := 64
-		if ip.Is4() {
+		if ordinary(r) {
+			bits = ip.BitLen()
+		}
+		if ip.Is4() && !ordinary(r) {
 			bits = 24
 		}
 		writeJSON(w, 200, map[string]string{"client_ip": ip.String(), "default_cidr": netip.PrefixFrom(ip, bits).String()})
 		return
 	}
 	if resource == "session" && r.Method == "GET" {
-		var name string
-		if a.DB.QueryRow(r.Context(), "SELECT username FROM administrators WHERE id=1").Scan(&name) != nil {
-			writeError(w, 503, "database_unavailable")
-			return
+		me := actor(r)
+		result := map[string]any{"username": me.Email, "user": me, "csrf": w.Header().Get("X-CSRF-Token")}
+		if me.Role == "admin" {
+			result["storage_enabled"] = a.Storage != nil
 		}
-		writeJSON(w, 200, map[string]any{"username": name, "csrf": w.Header().Get("X-CSRF-Token"), "storage_enabled": a.Storage != nil})
+		writeJSON(w, 200, result)
 		return
 	}
 	if resource == "logout" && r.Method == "POST" {
@@ -203,6 +214,9 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	if offset < 0 {
 		offset = 0
 	}
+	if a.userList(w, r, resource, limit, offset) {
+		return
+	}
 	args := []any{limit, offset}
 	var b []byte
 	var e error
@@ -253,6 +267,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	var e error
 	var tag pgconn.CommandTag
 	var token string
+	var keyTx pgx.Tx
+	var writer interface {
+		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	} = a.DB
 	switch resource {
 	case "upstream_keys":
 		if create {
@@ -270,6 +288,14 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
+		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil) {
+			writeError(w, 403, "forbidden")
+			return
+		}
+		if !a.ownsKey(r, id) && !create {
+			writeError(w, 404, "not_found")
+			return
+		}
 		if (in.StoreInput != nil && *in.StoreInput || in.StoreOutput != nil && *in.StoreOutput) && a.Storage == nil {
 			writeError(w, 400, "storage_not_configured")
 			return
@@ -283,6 +309,21 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 		changeExpiry := in.ExpiresInDays != nil
 		if in.CIDRs != nil {
 			parsed, err := parseCIDRs(*in.CIDRs)
+			// Restrictions follow the owner, even when an administrator edits.
+			var ownerRole string
+			if !create {
+				if err := a.DB.QueryRow(ctx, "SELECT u.role FROM gateway_keys g JOIN users u ON u.id=g.user_id WHERE g.id=$1", id).Scan(&ownerRole); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						writeError(w, 404, "not_found")
+					} else {
+						adminDBError(w, err)
+					}
+					return
+				}
+			}
+			if ordinary(r) || ownerRole == "user" {
+				parsed, err = userCIDRs(*in.CIDRs)
+			}
 			if err != nil {
 				writeError(w, 400, err.Error())
 				return
@@ -302,6 +343,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			for _, m := range *in.Models {
 				if m == "" || strings.TrimSpace(m) != m || (m == "*" && len(*in.Models) != 1) {
 					writeError(w, 400, "models_required")
+					return
+				}
+				if ordinary(r) && m != "*" && !a.pricedModel(ctx, m) {
+					writeError(w, 400, "priced_model_required")
 					return
 				}
 				if !seen[m] {
@@ -339,12 +384,37 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			}
 			expiry = time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
 		}
+		if create && ordinary(r) {
+			keyTx, e = a.DB.Begin(ctx)
+			if e != nil {
+				adminDBError(w, e)
+				return
+			}
+			defer keyTx.Rollback(ctx)
+			var owner string
+			e = keyTx.QueryRow(ctx, "SELECT id FROM users WHERE id=$1 AND enabled FOR UPDATE", actor(r).ID).Scan(&owner)
+			if e != nil {
+				writeError(w, 401, "unauthorized")
+				return
+			}
+			var count int
+			e = keyTx.QueryRow(ctx, "SELECT count(*) FROM gateway_keys WHERE user_id=$1 AND deleted_at IS NULL", owner).Scan(&count)
+			if e != nil {
+				adminDBError(w, e)
+				return
+			}
+			if count >= 3 {
+				writeError(w, 409, "user_key_limit")
+				return
+			}
+			writer = keyTx
+		}
 		if create {
 			token = gatewayKeyPrefix + randomToken(32)
 			var secret []byte
 			secret, e = seal(a.Config.MasterKey, token)
 			if e == nil {
-				tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false))", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput)
+				tag, e = writer.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output,user_id) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false),$12)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput, keyOwner(r))
 			}
 		} else {
 			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output) WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput)
@@ -352,6 +422,9 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	default:
 		writeError(w, 404, "not_found")
 		return
+	}
+	if e == nil && keyTx != nil {
+		e = keyTx.Commit(ctx)
 	}
 	if e != nil {
 		adminDBError(w, e)
@@ -437,7 +510,7 @@ func (a *App) deleteGatewayKey(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, 404, "not_found")
 		return
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id) VALUES($1,'delete','gateway_keys',$2)", newID(), id); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id,actor_id) VALUES($1,'delete','gateway_keys',$2,$3)", newID(), id, actorID(ctx)); err != nil {
 		adminDBError(w, err)
 		return
 	}

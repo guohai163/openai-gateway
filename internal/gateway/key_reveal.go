@@ -62,7 +62,7 @@ func (a *App) revealGatewayKey(w http.ResponseWriter, r *http.Request, id string
 	if in.Key != "" {
 		action = "import_original"
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id) VALUES($1,$2,'gateway_keys',$3)", newID(), action, id); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id,actor_id) VALUES($1,$2,'gateway_keys',$3,$4)", newID(), action, id, actorID(ctx)); err != nil {
 		adminDBError(w, err)
 		return
 	}

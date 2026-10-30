@@ -91,8 +91,12 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found")
 		return
 	}
-	if !allowedModel(k, model) {
+	if !allowedModel(k, model) || (k.PricedOnly && !a.pricedModel(r.Context(), model)) {
 		writeError(w, 403, "model_not_allowed")
+		return
+	}
+	if k.PricedOnly && serviceTier != "" && serviceTier != "standard" && serviceTier != "default" {
+		writeError(w, 403, "service_tier_not_allowed")
 		return
 	}
 	attempted := map[string]bool{}
@@ -215,7 +219,7 @@ func (a *App) logAttempt(k GatewayKey, u Upstream, r *http.Request, status int, 
 	a.record(ctx, k, u, r.Method, r.URL.Path, status, code, start, usage, id, attempt, "inference")
 }
 func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
-	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) ORDER BY m.model`)
+	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform='openai')) ORDER BY m.model`, k.PricedOnly)
 	if e != nil {
 		writeError(w, 503, "database_unavailable")
 		return
@@ -231,7 +235,12 @@ func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
 			return
 		}
 		if !seen[id] && allowedModel(k, id) {
-			data = append(data, json.RawMessage(b))
+			if k.PricedOnly {
+				safe, _ := json.Marshal(map[string]any{"id": id, "object": "model", "created": 0, "owned_by": "gateway"})
+				data = append(data, safe)
+			} else {
+				data = append(data, json.RawMessage(b))
+			}
 			seen[id] = true
 		}
 	}

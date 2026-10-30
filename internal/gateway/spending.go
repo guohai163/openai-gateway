@@ -44,8 +44,18 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
 		}
 	}
 	filter := ""
+	if ordinary(r) {
+		filter = " AND gateway_key_id IN (SELECT id FROM gateway_keys WHERE user_id=$4)"
+	}
 	args := []any{start, end, a.reportLocation().String()}
+	if ordinary(r) {
+		args = append(args, actor(r).ID)
+	}
 	if resource != "" {
+		if ordinary(r) && (resource != "gateway_keys" || !a.ownsKey(r, id)) {
+			writeError(w, 404, "not_found")
+			return
+		}
 		if resource != "upstream_keys" && resource != "gateway_keys" {
 			writeError(w, 404, "not_found")
 			return
@@ -64,7 +74,11 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
 		if resource == "gateway_keys" {
 			column = "gateway_key_id"
 		}
-		filter = " AND " + column + "=$4"
+		if ordinary(r) {
+			filter += " AND " + column + "=$5"
+		} else {
+			filter = " AND " + column + "=$4"
+		}
 		args = append(args, id)
 	}
 	var data []byte
@@ -93,11 +107,19 @@ SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
 
 // Executed only for the page of keys being displayed. A single query computes
 // the month summaries for all those keys, preserving NUMERIC as decimal text.
-func (a *App) keyMonthlyQuery(resource string) string {
+func (a *App) keyMonthlyQuery(resource string) string { return a.keyMonthlyScope(resource, false) }
+func (a *App) keyMonthlyScope(resource string, limited bool) string {
 	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
 	if resource == "gateway_keys" {
 		column = "gateway_key_id"
-		base = `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal,store_input,store_output FROM gateway_keys WHERE deleted_at IS NULL`
+		fields := `id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal`
+		filter := `deleted_at IS NULL`
+		if limited {
+			filter += ` AND user_id=$5`
+		} else {
+			fields += `,store_input,store_output,(SELECT email FROM users u WHERE u.id=gateway_keys.user_id) AS owner_email`
+		}
+		base = `SELECT ` + fields + ` FROM gateway_keys WHERE ` + filter
 	}
 	return `WITH selected AS (` + base + ` ORDER BY created_at DESC LIMIT $1 OFFSET $2), usage AS (
  SELECT ` + column + ` AS key_id,count(DISTINCT coalesce(request_uuid::text,id)) AS requests,sum(total_cost)::text AS cost,

@@ -46,7 +46,7 @@ func (a *App) rotateGatewayKey(w http.ResponseWriter, r *http.Request, id string
 		adminDBError(w, err)
 		return
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id) VALUES($1,'rotate','gateway_keys',$2)", newID(), id); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id,actor_id) VALUES($1,'rotate','gateway_keys',$2,$3)", newID(), id, actorID(ctx)); err != nil {
 		adminDBError(w, err)
 		return
 	}

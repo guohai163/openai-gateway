@@ -9,9 +9,17 @@ type Props = {
   models: string[];
   defaultValue: string[];
   t: (key: string) => string;
+  allowAll?: boolean;
+  pricedOnly?: boolean;
 };
 
-export function ModelMultiSelect({ models, defaultValue, t }: Props) {
+export function ModelMultiSelect({
+  models,
+  defaultValue,
+  t,
+  allowAll = true,
+  pricedOnly = false,
+}: Props) {
   const [selected, setSelected] = useState<string[]>(() =>
     normalizeModelSelection(defaultValue),
   );
@@ -50,7 +58,7 @@ export function ModelMultiSelect({ models, defaultValue, t }: Props) {
   }, [open]);
 
   const summary = selected.includes("*")
-    ? t("allModels")
+    ? t(pricedOnly ? "allPricedModels" : "allModels")
     : selected.length
       ? t("selectedModels").replace("{count}", String(selected.length))
       : t("selectModels");
@@ -98,19 +106,23 @@ export function ModelMultiSelect({ models, defaultValue, t }: Props) {
                 }}
               />
             </label>
-            <label className="model-option all-models-option">
-              <input
-                type="checkbox"
-                checked={selected.includes("*")}
-                onChange={() =>
-                  setSelected((current) => toggleModelSelection(current, "*"))
-                }
-              />
-              <span>
-                {t("allModels")}
-                <small>{t("allModelsHint")}</small>
-              </span>
-            </label>
+            {allowAll && (
+              <label className="model-option all-models-option">
+                <input
+                  type="checkbox"
+                  checked={selected.includes("*")}
+                  onChange={() =>
+                    setSelected((current) => toggleModelSelection(current, "*"))
+                  }
+                />
+                <span>
+                  {t(pricedOnly ? "allPricedModels" : "allModels")}
+                  <small>
+                    {t(pricedOnly ? "allPricedModelsHint" : "allModelsHint")}
+                  </small>
+                </span>
+              </label>
+            )}
             <div className="model-options-list">
               {options.map((model) => (
                 <label className="model-option" key={model}>
@@ -154,7 +166,9 @@ export function ModelMultiSelect({ models, defaultValue, t }: Props) {
           {selected.length > 4 && <small>+{selected.length - 4}</small>}
         </div>
       )}
-      <small className="field-hint">{t("modelHint")}</small>
+      <small className="field-hint">
+        {t(pricedOnly ? "pricedModelsHint" : "modelHint")}
+      </small>
     </div>
   );
 }

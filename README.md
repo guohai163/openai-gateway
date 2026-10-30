@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/gyai-icon.png)
 
-最新版本：[v1.6.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.6.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.6.0`。
+最新版本：[v1.7.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.7.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.7.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -14,10 +14,11 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 - 直接添加上游普通 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
 - 按可用模型轮询上游 Key，明确拒绝时最多尝试 3 个不同 Key。
-- 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销。`*` 表示所有当前可用模型。
+- 多用户系统：管理员及普通用户；全员密码＋TOTP 登录，管理员创建账号并生成一次性展示的 14 位初始密码。
+- 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销；普通用户最多 3 个，只能使用有效定价模型、查看自己的密钥和调用情况。
 - Chat Completions、Embeddings、Responses 和 SSE；Responses 资源归属及多轮上下文持久化绑定。
 - 按上游 Key 记录额度阻断、认证错误与限流，支持定时小额探测自动恢复。
-- AES-256-GCM 加密上游凭据和私有 Key；私有 Key 另存 SHA-256 哈希用于认证，支持管理员回显；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
+- AES-256-GCM 加密上游凭据、私有 Key 和 TOTP 密钥；私有 Key 另存 SHA-256 哈希用于认证，管理员或所属用户可回显；密码 bcrypt；服务端会话、CSRF、登录限速与 OTP 防重放。
 - 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
 - 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。默认只记录调用元数据；配置 S3 后可按私钥选择存储输入/输出 JSON。
 
@@ -198,20 +199,53 @@ multipart 保留原始 boundary、重复图片字段、文件字节、mask 及�
 
 Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操作绑定原上游，禁用、额度不足或模型不可用时返回 `503 no_available_upstream`，不会切换账户。只接受本网关生成并登记的 ID。保留上游 `store` 默认行为；使用 `store=false` 时上游可能不支持后续查询或续接，网关不会额外保存上下文。
 
-管理 API 位于 `/admin/api`，先 `POST /login` 获取会话 Cookie 和 `csrf`，非 GET 操作携带 `X-CSRF-Token`。后台使用这些相同接口：
+控制台 API 位于 `/admin/api`。先 `POST /login` 验证邮箱（旧管理员可使用原用户名）和密码，取得短期验证 Cookie 与 `csrf`；再 `POST /mfa` 提交 `{"otp":"六位动态码"}` 并携带 `X-CSRF-Token`，通过后才取得正式会话。首次登录需先绑定身份验证器；仅密码不能进入系统。非 GET 操作均携带 CSRF Token。后台使用这些相同接口：
 
 - `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
 - `GET /client_ip` 返回当前请求的 `client_ip` 和建议的 `default_cidr`（IPv4 `/24`、IPv6 `/64`）。新建私有 Key 时自动填入白名单，可手动修改；编辑已有 Key 保留原白名单。客户端 IP 沿用 `TRUSTED_PROXIES` 的可信代理解析，不信任任意转发头。
 - `GET, POST /upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 只需名称和密钥。
 - `POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /upstream_keys/{id}/probe`。
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
-- 私有 Key 使用 `models` 数组设置模型权限；`["*"]` 表示全部当前及未来可用模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
+- 私有 Key 使用 `models` 数组设置模型权限；管理员的 `["*"]` 表示全部当前及未来可用模型，普通用户的 `["*"]` 仅表示全部当前及未来具有有效完整定价的模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
 - `GET /logs|audit`；列表支持 `limit`（1–500）、`offset`。
 - `POST /gateway_keys/{id}/reveal` 在管理员会话及 CSRF 校验后返回明文，响应带 `Cache-Control: no-store`；请求体 `{}`，或 `{"key":"原密钥"}` 验证补录旧密钥。列表只返回 `can_reveal`，不返回哈希或密文。回显和补录操作保存管理审计，不记录密钥值。
 - `POST /gateway_keys/{id}/rotate` 仅用于没有加密副本的旧私有 Key；管理员会话和 CSRF 校验通过后生成新 Key，撤销旧哈希并返回一次明文。响应带 `Cache-Control: no-store`，操作保存管理审计，不记录密钥值。
 - `DELETE /gateway_keys/{id}` 删除私有密钥，要求管理员会话和 CSRF。删除会撤销原凭据、停用并隐藏该密钥，保留历史调用、用量与 Responses 归属；已删除密钥不可通过编辑重新启用。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。
+
+## 多用户、权限与 TOTP
+
+仅管理员可以在“用户管理”创建账号：输入邮箱，默认角色为普通用户，也可选择管理员。系统使用密码学随机数生成 14 位初始密码，仅在创建或重置后展示一次，不发送邮件、不保存明文。用户可自行修改密码，无需首次强制修改；修改时验证当前密码和一个尚未使用的 OTP，随后全部会话退出。
+
+| 能力 | 管理员 | 普通用户 |
+| --- | --- | --- |
+| 用户、上游、价格同步、系统设置、管理审计 | 可管理 | 不可访问 |
+| 私钥及调用记录 | 全部用户 | 仅自己，包括自己的历史调用 |
+| 创建私钥 | 无三个限制 | 最多 3 个未删除私钥，禁用/过期仍计数，删除释放名额；并发安全 |
+| IP 白名单 | 可配置 IPv4/IPv6/CIDR | 支持具体 IP 和限定 CIDR；禁止 `/0` 全网、`0.0.0.0`、`::` 及未指定地址网络 |
+| 可用模型 | 按私钥权限选择已同步模型 | 同时要求当前有效完整价格；创建、列表及实际调用均校验 |
+| 输入/输出正文存储 | 按私钥配置 | 不能查看或修改配置；接口不返回开关、存储路径或归档状态 |
+
+普通用户默认只看到“私有密钥”“调用记录”“我的账号”，可回显、复制、修改、续期或删除自己的私钥，并展开自己的自然月模型消费。上游 ID、名称及配置信息不返回给普通用户。默认白名单按其当前连接来源填入具体 IP（IPv4 `/32`、IPv6 `/128`），管理员仍默认 `/24`、`/64`。可信代理解析规则沿用 `TRUSTED_PROXIES`。
+
+“有价格”指 `model_pricing` 的 `price_status=ready`：精确模型、当前有效来源、已知上下文规则及必要的输入/输出分项价格。管理员同步价格后，普通用户模型列表自动更新；无价或失效价格不可通过已有私钥继续调用。普通用户调用仅支持已有 Standard/default 单价档位。管理员可为任一用户的私钥配置 S3 输入/输出记录，普通用户提交相关字段统一被拒绝，不能借助错误探测是否启用了存储。
+
+首次登录会展示**本地生成**的绑定二维码和手动密钥，支持 Google Authenticator、Microsoft Authenticator 等 TOTP App。密钥仅用于本地二维码，不发送到第三方服务。使用 SHA-1、6 位码、30 秒周期，允许相邻时间窗口，校验成功后同一时间步不能再次使用；服务器和手机需保持时间同步。短期验证凭据 5 分钟过期、最多 5 次验证码尝试；IP 限速和账号失败锁定同时生效。TOTP 密钥使用 `MASTER_KEY` 加密入库，备份时一并保管主密钥。
+
+管理员可停用用户、切换角色、重置密码和 OTP。相关操作会使目标用户的登录会话及尚未完成的验证凭据失效；**停用用户同时阻止其全部私钥的新请求**，重新启用后仍需重新登录。重置密码保留原 OTP，重置 OTP 后下次用原密码登录需重新绑定。不能停用或降级最后一名启用的管理员；管理员降级前，其未删除私钥必须不超过三个，白名单也必须符合普通用户规则。操作写入审计，密码、验证码和绑定密钥不进入日志。
+
+新增接口（均需对应权限的正式会话与 CSRF）：
+
+- `GET, POST /admin/api/users`：管理员列出或创建用户；`POST` 接收 `email`、可选 `role`（`user` / `admin`）。
+- `PATCH /admin/api/users/{id}`：管理员设置 `role` 或 `enabled`。
+- `POST /admin/api/users/{id}/reset_password`、`reset_otp`：管理员重置凭据；新密码仅此次响应可见。
+- `GET /admin/api/account`、`POST /admin/api/account/password`：当前账号及修改密码；后者接收 `current_password`、`password`（12–72 字节）、`otp`。
+- 普通用户对私钥列表、回显、编辑、删除、消费统计和调用记录接口始终按所属用户过滤；跨用户 ID 返回 `404`。
+
+升级会自动执行 `011_users_and_mfa.sql`，保留原管理员用户名及密码哈希，已有私钥和历史记录归原管理员，**全部旧会话退出，原管理员下一次登录也必须绑定 OTP**。不需要重新颁发已有 API Key。迁移替换旧管理员表，回滚旧程序需要恢复升级前数据库备份。
+
+丢失身份验证器时由另一名管理员重置 OTP。若唯一管理员无法登录，数据库维护者可在确认账号归属后，通过数据库事务清除该账号的 `totp_secret`、将 `totp_last_step=-1`、递增 `auth_version`，并删除对应 `sessions` 与 `login_challenges`；保留密码哈希，之后必须使用原密码重新绑定。不要通过关闭 OTP 校验恢复访问。
 
 ## 模型定价
 

@@ -78,6 +78,24 @@ func (a *App) migrate(ctx context.Context) error {
 			return e
 		}
 		if !exists {
+			if f == "migrations/011_users_and_mfa.sql" {
+				var initialized bool
+				if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM administrators)").Scan(&initialized); e != nil {
+					return e
+				}
+				if !initialized {
+					if len(a.Config.AdminPassword) < 12 {
+						return errors.New("initial ADMIN_PASSWORD must contain at least 12 characters")
+					}
+					digest, err := bcrypt.GenerateFromPassword([]byte(a.Config.AdminPassword), bcrypt.DefaultCost)
+					if err != nil {
+						return err
+					}
+					if _, e = tx.Exec(ctx, "INSERT INTO administrators VALUES(1,$1,$2)", a.Config.AdminUsername, string(digest)); e != nil {
+						return e
+					}
+				}
+			}
 			b, _ := migrations.ReadFile(f)
 			if _, e = tx.Exec(ctx, string(b)); e != nil {
 				return e
@@ -85,22 +103,6 @@ func (a *App) migrate(ctx context.Context) error {
 			if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations VALUES($1)", f); e != nil {
 				return e
 			}
-		}
-	}
-	var exists bool
-	if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM administrators)").Scan(&exists); e != nil {
-		return e
-	}
-	if !exists {
-		if len(a.Config.AdminPassword) < 12 {
-			return errors.New("initial ADMIN_PASSWORD must contain at least 12 characters")
-		}
-		b, e := bcrypt.GenerateFromPassword([]byte(a.Config.AdminPassword), bcrypt.DefaultCost)
-		if e != nil {
-			return e
-		}
-		if _, e = tx.Exec(ctx, "INSERT INTO administrators VALUES(1,$1,$2)", a.Config.AdminUsername, string(b)); e != nil {
-			return e
 		}
 	}
 	return tx.Commit(ctx)
@@ -117,6 +119,7 @@ func (a *App) Handler(ui fs.FS) http.Handler {
 		writeJSON(w, 200, map[string]any{"status": "ok"})
 	})
 	mux.HandleFunc("POST /admin/api/login", a.login)
+	mux.HandleFunc("POST /admin/api/mfa", a.completeMFA)
 	mux.Handle("/admin/api/", a.adminAuth(http.HandlerFunc(a.admin)))
 	mux.Handle("/v1/", a.gatewayAuth(http.HandlerFunc(a.proxy)))
 	if ui != nil {
@@ -156,7 +159,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 func (a *App) audit(ctx context.Context, action, resource, id string) {
-	if _, e := a.DB.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id) VALUES($1,$2,$3,$4)", newID(), action, resource, id); e != nil {
+	if _, e := a.DB.Exec(ctx, "INSERT INTO audit_logs(id,action,resource,resource_id,actor_id) VALUES($1,$2,$3,$4,$5)", newID(), action, resource, id, actorID(ctx)); e != nil {
 		slog.Error("audit persistence failed")
 	}
 }
