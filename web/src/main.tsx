@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   ArrowUpRight,
-  Box,
+  Coins,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -35,11 +35,12 @@ import {
   resolveTheme,
   themeStorageKey,
 } from "./theme.mjs";
+import { ModelPricing } from "./ModelPricing";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
   | "overview"
-  | "projects"
+  | "pricing"
   | "upstream_keys"
   | "gateway_keys"
   | "logs"
@@ -136,6 +137,7 @@ function App() {
       .catch(() => setSession(null));
   }, []);
   async function load() {
+    if (page === "pricing") return;
     setLoading(true);
     setError("");
     try {
@@ -396,13 +398,13 @@ function App() {
   const nav: [Page, React.ReactNode][] = [
     ["overview", <LayoutDashboard size={18} />],
     ["upstream_keys", <KeyRound size={18} />],
-    ["projects", <Box size={18} />],
+    ["pricing", <Coins size={18} />],
     ["gateway_keys", <ShieldCheck size={18} />],
     ["logs", <Activity size={18} />],
     ["audit", <Terminal size={18} />],
     ["settings", <Settings size={18} />],
   ];
-  const canAdd = ["projects", "upstream_keys", "gateway_keys"].includes(page);
+  const canAdd = ["upstream_keys", "gateway_keys"].includes(page);
   const status = (r: Row) =>
     !r.enabled
       ? "disabled"
@@ -414,10 +416,8 @@ function App() {
             ? "pending"
             : "active";
   const columns: Record<string, string[]> = {
-    projects: ["name", "description", "status", "created_at"],
     upstream_keys: [
       "name",
-      "upstream_project_id",
       "models",
       "status",
       "model_synced_at",
@@ -595,21 +595,23 @@ function App() {
                     ? "introduction"
                     : page === "settings"
                       ? "settingsHint"
-                      : page === "projects"
-                        ? "projectPoolHint"
+                      : page === "pricing"
+                        ? "pricingDescription"
                         : "subtitle",
                 )}
               </p>
             </div>
             <div className="heading-actions">
-              <button
-                className="secondary"
-                disabled={loading || busy}
-                onClick={() => void load()}
-              >
-                <RefreshCw size={16} className={loading ? "spinning" : ""} />
-                {t("refresh")}
-              </button>
+              {page !== "pricing" && (
+                <button
+                  className="secondary"
+                  disabled={loading || busy}
+                  onClick={() => void load()}
+                >
+                  <RefreshCw size={16} className={loading ? "spinning" : ""} />
+                  {t("refresh")}
+                </button>
+              )}
               {canAdd && (
                 <button
                   className="primary"
@@ -634,7 +636,14 @@ function App() {
               </button>
             </div>
           )}
-          {page === "overview" ? (
+          {page === "pricing" ? (
+            <ModelPricing
+              api={api}
+              t={t}
+              locale={locale}
+              onUnauthorized={() => setSession(null)}
+            />
+          ) : page === "overview" ? (
             <>
               <div className="stats-grid">
                 {[
@@ -649,7 +658,7 @@ function App() {
                 ].map(([label, value]: any) => (
                   <section className="stat-card" key={label}>
                     <div className="stat-label">{t(label)}</div>
-                    <strong>{number(value)}</strong>
+                    <strong>{value === null ? "→" : number(value)}</strong>
                     {(label === "available" || label === "tokens") && (
                       <small>
                         {label === "available"
@@ -670,7 +679,7 @@ function App() {
                   </div>
                   {[
                     ["upstream_keys", KeyRound, dashboard.upstream_keys],
-                    ["projects", Box, dashboard.projects],
+                    ["pricing", Coins, null],
                     ["gateway_keys", KeyRound, dashboard.gateway_keys],
                   ].map(([label, Icon, value]: any) => (
                     <button
@@ -682,7 +691,7 @@ function App() {
                         <Icon size={20} />
                       </div>
                       <span>{t(label)}</span>
-                      <strong>{number(value)}</strong>
+                      <strong>{value === null ? "→" : number(value)}</strong>
                       <ChevronRight size={17} />
                     </button>
                   ))}
@@ -933,18 +942,10 @@ function App() {
                   page === "gateway_keys" ? "keyNameHint" : "",
                   !modal.id || page === "gateway_keys",
                 )}
-                {page === "projects" && (
-                  <>{field("description", "text", "projectPoolHint")}</>
-                )}
                 {page === "upstream_keys" && (
                   <>
                     {!modal.id &&
                       field("key", "password", "upstreamHint", true)}
-                    {field(
-                      "upstream_project_id",
-                      "text",
-                      "upstreamProjectHint",
-                    )}
                     {field("probe_model", "text", "probeHint")}
                   </>
                 )}

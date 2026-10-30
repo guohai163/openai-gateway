@@ -27,8 +27,7 @@ func TestStandaloneUpstreamKeys(t *testing.T) {
 	defer up.Close()
 	a.Config.UpstreamURL = up.URL
 	w := httptest.NewRecorder()
-	project := "proj-optional"
-	a.saveResource(w, httptest.NewRequest("POST", "/admin/api/upstream_keys", nil), "upstream_keys", "", resourceInput{Name: "Direct key", Key: "sk-direct-key", UpstreamProjectID: &project})
+	a.saveResource(w, httptest.NewRequest("POST", "/admin/api/upstream_keys", nil), "upstream_keys", "", resourceInput{Name: "Direct key", Key: "sk-direct-key"})
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -40,16 +39,8 @@ func TestStandaloneUpstreamKeys(t *testing.T) {
 		t.Fatal("standalone key did not sync", err)
 	}
 	us, err := a.candidates(ctx, "test-model", "")
-	if err != nil || len(us) != 1 || us[0].ID != created.ID || us[0].Project != project {
+	if err != nil || len(us) != 1 || us[0].ID != created.ID {
 		t.Fatal("standalone key not schedulable", err, us)
-	}
-	// Independent gateway projects never restrict the key pool.
-	if _, err := a.DB.Exec(ctx, "INSERT INTO projects(id,name,enabled) VALUES('business-a','A',false)"); err != nil {
-		t.Fatal(err)
-	}
-	us, err = a.candidates(ctx, "test-model", "")
-	if err != nil || len(us) != 1 {
-		t.Fatal("business project restricted standalone key", err)
 	}
 	probe := "test-model"
 	w = httptest.NewRecorder()
@@ -151,14 +142,14 @@ func testExistingDatabaseMigration(t *testing.T, baseline int) {
 	if e = a.migrate(ctx); e != nil {
 		t.Fatal(e)
 	}
-	var project, probe string
+	var probe string
 	var enabled, blocked bool
 	var cipher []byte
-	if e = a.DB.QueryRow(ctx, "SELECT upstream_project_id,probe_model,enabled,quota_blocked,secret FROM upstream_keys WHERE id='old-key'").Scan(&project, &probe, &enabled, &blocked, &cipher); e != nil {
+	if e = a.DB.QueryRow(ctx, "SELECT probe_model,enabled,quota_blocked,secret FROM upstream_keys WHERE id='old-key'").Scan(&probe, &enabled, &blocked, &cipher); e != nil {
 		t.Fatal(e)
 	}
 	plain, e := openSecret(a.Config.MasterKey, cipher)
-	if e != nil || plain != "sk-existing" || project != "proj-original" || probe != "test-model" || enabled || !blocked {
+	if e != nil || plain != "sk-existing" || probe != "test-model" || enabled || !blocked {
 		t.Fatal("key migration damaged data")
 	}
 	var n int
@@ -180,7 +171,7 @@ func testExistingDatabaseMigration(t *testing.T, baseline int) {
 		t.Fatal("removed management credentials retained", e)
 	}
 	var description string
-	if e = a.DB.QueryRow(ctx, "SELECT description FROM projects WHERE id='old-project'").Scan(&description); e != nil {
+	if e = a.DB.QueryRow(ctx, "SELECT description FROM archived_gateway_projects WHERE id='old-project'").Scan(&description); e != nil {
 		t.Fatal("business project lost", e)
 	}
 }

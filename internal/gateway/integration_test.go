@@ -240,13 +240,13 @@ func TestAdminCRUDAndSecrets(t *testing.T) {
 	if status, _ = adminReq("POST", "gateway_keys", `{"name":"bad","cidrs":[]}`, true); status != 400 {
 		t.Fatal("empty allowlist accepted")
 	}
-	for _, path := range []string{"projects", "upstream_keys", "gateway_keys", "dashboard", "settings", "audit", "logs"} {
+	for _, path := range []string{"upstream_keys", "gateway_keys", "dashboard", "settings", "audit", "logs"} {
 		status, b = adminReq("GET", path, "", true)
 		if status != 200 {
 			t.Fatalf("list %s: %d %s", path, status, b)
 		}
 	}
-	for _, path := range []string{"organizations", "upstream_projects", "costs", "organizations/old/official_keys"} {
+	for _, path := range []string{"projects", "organizations", "upstream_projects", "costs", "organizations/old/official_keys"} {
 		if status, _ = adminReq("GET", path, "", true); status != 404 {
 			t.Fatalf("removed endpoint %s returned %d", path, status)
 		}

@@ -11,12 +11,12 @@ import (
 )
 
 type Upstream struct {
-	ID, Project, Model, ProbeModel string
-	Secret                         []byte
+	ID, Model, ProbeModel string
+	Secret                []byte
 }
 
 const upstreamJoins = `FROM upstream_keys k `
-const selectUpstream = `SELECT k.id,k.upstream_project_id,k.secret,k.probe_model ` + upstreamJoins
+const selectUpstream = `SELECT k.id,k.secret,k.probe_model ` + upstreamJoins
 const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
@@ -28,7 +28,7 @@ func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, er
 	out := []Upstream{}
 	for rows.Next() {
 		var u Upstream
-		if e = rows.Scan(&u.ID, &u.Project, &u.Secret, &u.ProbeModel); e != nil {
+		if e = rows.Scan(&u.ID, &u.Secret, &u.ProbeModel); e != nil {
 			return nil, e
 		}
 		u.Model = model
@@ -57,10 +57,8 @@ func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, 
 		return nil, e
 	}
 	req.Header.Set("Authorization", "Bearer "+secret)
-	// The API key determines its organization; only an optional project scope is explicit.
-	if u.Project != "" {
-		req.Header.Set("OpenAI-Project", u.Project)
-	}
+	// The API key determines its upstream scope.
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "identity")
 	return req, nil

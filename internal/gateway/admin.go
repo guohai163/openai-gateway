@@ -15,15 +15,13 @@ import (
 )
 
 type resourceInput struct {
-	Name              string    `json:"name"`
-	UpstreamProjectID *string   `json:"upstream_project_id"`
-	Description       *string   `json:"description"`
-	Key               string    `json:"key"`
-	ProbeModel        *string   `json:"probe_model"`
-	Enabled           *bool     `json:"enabled"`
-	Models            *[]string `json:"models"`
-	CIDRs             *[]string `json:"cidrs"`
-	ExpiresInDays     *int      `json:"expires_in_days"`
+	Name          string    `json:"name"`
+	Key           string    `json:"key"`
+	ProbeModel    *string   `json:"probe_model"`
+	Enabled       *bool     `json:"enabled"`
+	Models        *[]string `json:"models"`
+	CIDRs         *[]string `json:"cidrs"`
+	ExpiresInDays *int      `json:"expires_in_days"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -31,6 +29,10 @@ var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
 func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/"), "/"), "/")
 	resource := parts[0]
+	if resource == "pricing" {
+		a.pricingAdmin(w, r, parts)
+		return
+	}
 	if resource == "client_ip" && len(parts) == 1 && r.Method == "GET" {
 		ip, err := clientIP(r, a.Config.TrustedProxies)
 		if err != nil {
@@ -97,7 +99,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch resource {
-	case "projects", "upstream_keys", "gateway_keys", "logs", "audit", "models", "cooldowns":
+	case "upstream_keys", "gateway_keys", "logs", "audit", "models", "cooldowns":
 	default:
 		writeError(w, 404, "not_found")
 		return
@@ -127,7 +129,6 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	var b []byte
 	e := a.DB.QueryRow(r.Context(), `SELECT json_build_object(
- 'projects',(SELECT count(*) FROM projects),
  'upstream_keys',(SELECT count(*) FROM upstream_keys),'gateway_keys',(SELECT count(*) FROM gateway_keys WHERE deleted_at IS NULL),
  'available_keys',(SELECT count(*) `+upstreamJoins+`WHERE `+available+`),
  'requests_today',(SELECT count(DISTINCT id) FROM request_logs WHERE created_at>=date_trunc('day',now()) AND kind='inference'),
@@ -142,8 +143,7 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string) {
 	queries := map[string]string{
-		"projects":      `SELECT * FROM projects ORDER BY created_at DESC`,
-		"upstream_keys": `SELECT k.id,k.upstream_project_id,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
+		"upstream_keys": `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
 		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
 		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
 		"audit":         `SELECT * FROM audit_logs ORDER BY created_at DESC`,
@@ -208,16 +208,6 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	var tag pgconn.CommandTag
 	var token string
 	switch resource {
-	case "projects":
-		if in.UpstreamProjectID != nil || in.Key != "" || in.ProbeModel != nil {
-			writeError(w, 400, "project_binding_not_supported")
-			return
-		}
-		if create {
-			tag, e = a.DB.Exec(ctx, "INSERT INTO projects(id,name,description,enabled) VALUES($1,$2,$3,$4)", id, name, optionalString(in.Description), enabled(in.Enabled))
-		} else {
-			tag, e = a.DB.Exec(ctx, "UPDATE projects SET name=coalesce(nullif($2,''),name),description=coalesce($3,description),enabled=coalesce($4,enabled) WHERE id=$1", id, name, in.Description, in.Enabled)
-		}
 	case "upstream_keys":
 		if create {
 			if !strings.HasPrefix(in.Key, "sk-") || strings.HasPrefix(in.Key, "sk-admin-") {
@@ -229,9 +219,9 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 500, "encryption_failed")
 				return
 			}
-			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,upstream_project_id,secret,fingerprint,enabled,probe_model) VALUES($1,$2,$3,$4,$5,$6,$7)", id, name, optionalString(in.UpstreamProjectID), secret, hash(in.Key), enabled(in.Enabled), optionalString(in.ProbeModel))
+			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,enabled,probe_model) VALUES($1,$2,$3,$4,$5,$6)", id, name, secret, hash(in.Key), enabled(in.Enabled), optionalString(in.ProbeModel))
 		} else {
-			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),upstream_project_id=coalesce($4,upstream_project_id),probe_model=coalesce($5,probe_model) WHERE id=$1", id, name, in.Enabled, in.UpstreamProjectID, in.ProbeModel)
+			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
 		if (create || in.Name != "") && (!privateKeyNamePattern.MatchString(name) || name != in.Name) {

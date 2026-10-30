@@ -19,7 +19,7 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 		}
 	}()
 	var u Upstream
-	e := a.DB.QueryRow(ctx, selectUpstream+"WHERE k.id=$1", id).Scan(&u.ID, &u.Project, &u.Secret, &u.ProbeModel)
+	e := a.DB.QueryRow(ctx, selectUpstream+"WHERE k.id=$1", id).Scan(&u.ID, &u.Secret, &u.ProbeModel)
 	if e != nil {
 		return e
 	}
@@ -73,6 +73,9 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 	if _, e = tx.Exec(ctx, "UPDATE upstream_keys SET model_synced_at=now(),model_sync_error='',model_catalog=$2 WHERE id=$1", id, json.RawMessage(b)); e != nil {
 		return e
 	}
+	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model) SELECT k.platform,m.model FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.id=$1 ON CONFLICT(platform,model) DO NOTHING`, id); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
@@ -104,7 +107,7 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
  AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=k.probe_model)
  AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.scope='key' AND c.scope_id=k.id AND c.until_at>now() AND c.model IN ('*',k.probe_model))`
 	var u Upstream
-	if e := a.DB.QueryRow(ctx, selectUpstream+"WHERE "+where, id).Scan(&u.ID, &u.Project, &u.Secret, &u.ProbeModel); e != nil {
+	if e := a.DB.QueryRow(ctx, selectUpstream+"WHERE "+where, id).Scan(&u.ID, &u.Secret, &u.ProbeModel); e != nil {
 		return e
 	}
 

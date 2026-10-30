@@ -27,6 +27,7 @@ type App struct {
 	rr            map[string]uint64
 	loginAttempts map[string]loginLimit
 	jobMu         sync.Mutex
+	pricingMu     sync.Mutex
 }
 type loginLimit struct {
 	Count int

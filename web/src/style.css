@@ -1430,3 +1430,79 @@ tbody tr:hover .actions-column {
   border: 1px solid var(--border);
   border-radius: 7px;
 }
+
+.pricing-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px;
+  margin-bottom: 16px;
+}
+.pricing-summary h2 {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.pricing-summary p {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.pricing-summary small {
+  color: var(--muted);
+  line-height: 1.7;
+  display: block;
+  max-width: 750px;
+}
+.pricing-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 18px 0;
+}
+.pricing-meta a {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  margin-left: auto;
+}
+.pricing-platform {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+.pricing-platform select {
+  width: auto;
+  min-width: 110px;
+}
+.pricing-missing-filter {
+  flex-direction: row;
+  align-items: center;
+  font-size: 12px;
+  gap: 7px;
+}
+.pricing-missing-filter input {
+  width: 14px;
+  height: 14px;
+}
+.pricing-page .missing-price-row td {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.missing-price-text {
+  color: var(--danger);
+}
+@media (max-width: 760px) {
+  .pricing-summary {
+    flex-direction: column;
+  }
+  .pricing-meta a {
+    margin-left: 0;
+  }
+  .pricing-summary .heading-actions {
+    flex-wrap: wrap;
+  }
+}
