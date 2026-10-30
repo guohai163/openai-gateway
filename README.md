@@ -4,6 +4,8 @@
 
 源码：[guohai163/openai-gateway](https://github.com/guohai163/openai-gateway) · 镜像：`ghcr.io/guohai163/openai-gateway`
 
+最新版本：[v1.4.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.4.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.4.0`。
+
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
 ## 功能
@@ -222,6 +224,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 1. PR、`main` 分支提交、`v*` 标签及手动触发都会执行前端测试与构建、PostgreSQL 集成与竞态测试、Go 静态分析、两种 Compose 配置校验和 Docker 镜像启动检查。
 2. 检查通过后，`main` 分支和 `v*` 标签会构建 `linux/amd64`、`linux/arm64` 镜像，并推送到 GHCR；PR 只验证，不发布镜像。
 3. 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，镜像发布任务具有 `packages: write`，不需要配置 Docker Hub 账号或另存发布令牌。
+4. 版本标签的镜像发布成功后，独立 Release 任务使用 `contents: write` 创建对应 GitHub Release。说明取自 `CHANGELOG.md` 的当前版本章节，并附镜像标签与摘要；发布前核对标签与前端版本一致。重新运行任务会更新同一 Release。
 
 | 触发来源 | 镜像标签示例 |
 | --- | --- |
@@ -232,6 +235,8 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 `latest` 跟随通过检查的 `main` 分支。正式部署可以将 `GATEWAY_IMAGE` 固定为某个版本、`sha-...` 标签或 `ghcr.io/guohai163/openai-gateway@sha256:...` 摘要。首次构建需要等待 Actions 成功后再拉取。
 
 发布新版本的示例（用实际版本号替换）：
+
+先更新 `web/package.json`、`web/package-lock.json` 的应用版本和 `CHANGELOG.md`，提交并推送到 `main`，再创建对应标签。
 
 ```sh
 git tag v1.2.3

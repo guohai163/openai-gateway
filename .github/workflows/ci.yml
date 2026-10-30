@@ -85,6 +85,8 @@ jobs:
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -137,3 +139,55 @@ jobs:
             echo "Digest: $IMAGE_DIGEST"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Publish GitHub Release
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Prepare version notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          IMAGE_NAME: ghcr.io/${{ github.repository }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          tag = os.environ['RELEASE_TAG']
+          version = json.loads(Path('web/package.json').read_text())['version']
+          lock = json.loads(Path('web/package-lock.json').read_text())
+          if tag != 'v' + version or lock['version'] != version or lock['packages']['']['version'] != version:
+              raise SystemExit('Release tag and application versions must match')
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+              raise SystemExit('A stable semantic version tag is required')
+          changelog = Path('CHANGELOG.md').read_text()
+          heading = re.search(r'^## ' + re.escape(tag) + r' - [^\n]+\n', changelog, re.M)
+          if heading is None:
+              raise SystemExit('Missing changelog section for this release')
+          notes = re.split(r'^## ', changelog[heading.end():], maxsplit=1, flags=re.M)[0].strip()
+          if not notes:
+              raise SystemExit('Release notes must not be empty')
+          image, digest = os.environ['IMAGE_NAME'], os.environ['IMAGE_DIGEST']
+          if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+              raise SystemExit('Missing published image digest')
+          notes += f'\n\n### Container images\n\n支持 `linux/amd64`、`linux/arm64`。\n\n```text\n{image}:{version}\n{image}:{tag}\n{image}@{digest}\n```\n'
+          Path('release-notes.md').write_text(notes)
+          PY
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md --draft=false --prerelease=false
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md --latest
+          fi
