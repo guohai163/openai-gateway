@@ -110,7 +110,8 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 		}
 		var k GatewayKey
 		var cidrs []string
-		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) FROM gateway_keys WHERE token_hash=$1 AND enabled AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs)
+		var canReveal bool
+		e := a.DB.QueryRow(r.Context(), `SELECT id,models,ARRAY(SELECT x::text FROM unnest(cidrs) x),secret IS NOT NULL FROM gateway_keys WHERE token_hash=$1 AND enabled AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal)
 		if e != nil {
 			writeError(w, 401, "invalid_api_key")
 			return
@@ -136,6 +137,13 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 			return
 		}
 		k.IP = ip
+		// Upgrade legacy hash-only keys after authentication and IP validation.
+		if !canReveal {
+			secret, err := seal(a.Config.MasterKey, token)
+			if err == nil {
+				_, _ = a.DB.Exec(r.Context(), "UPDATE gateway_keys SET secret=$2 WHERE id=$1 AND token_hash=$3 AND secret IS NULL AND deleted_at IS NULL", k.ID, secret, hash(token))
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyContext, k)))
 	})
 }

@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Check, Copy, X } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, X } from "lucide-react";
 import { buildCurlExample, exampleModel } from "./key-usage.mjs";
 
 type Props = {
@@ -7,6 +7,8 @@ type Props = {
   allowedModels: string[];
   availableModels: string[];
   initialKey?: string;
+  showKey?: boolean;
+  loadKey: (original?: string) => Promise<{ key: string }>;
   onClose: () => void;
   t: (key: string) => string;
 };
@@ -16,18 +18,58 @@ export function KeyUsageDialog({
   allowedModels,
   availableModels,
   initialKey = "",
+  showKey = false,
+  loadKey,
   onClose,
   t,
 }: Props) {
   const [key, setKey] = useState(initialKey);
-  const [model, setModel] = useState(exampleModel);
+  const [model, setModel] = useState(() => {
+    const permitted = (id: string) =>
+      allowedModels.includes("*") || allowedModels.includes(id);
+    return (
+      (permitted(exampleModel) && availableModels.includes(exampleModel)
+        ? exampleModel
+        : availableModels.find(permitted)) ||
+      allowedModels.find((id) => id !== "*") ||
+      exampleModel
+    );
+  });
   const [copyStatus, setCopyStatus] = useState("");
+  const [visible, setVisible] = useState(showKey);
+  const [keyLoading, setKeyLoading] = useState(!initialKey);
+  const [keyError, setKeyError] = useState("");
+  const [legacy, setLegacy] = useState(false);
   const id = useId();
   const permitted =
     allowedModels.includes("*") || allowedModels.includes(model.trim());
   const supported = availableModels.includes(model.trim());
   const options = allowedModels.includes("*") ? availableModels : allowedModels;
   const curl = buildCurlExample(location.origin, model, key);
+
+  useEffect(() => {
+    if (initialKey) return;
+    let active = true;
+    loadKey()
+      .then((result) => {
+        if (active) {
+          setKey(result.key);
+          setLegacy(false);
+        }
+      })
+      .catch((error: Error) => {
+        if (active) {
+          setLegacy(error.message === "key_not_recoverable");
+          setKeyError(error.message);
+        }
+      })
+      .finally(() => {
+        if (active) setKeyLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -59,20 +101,78 @@ export function KeyUsageDialog({
           <div className="usage-fields">
             <label>
               {t("usagePrivateKey")}
-              <input
-                type="password"
-                value={key}
-                placeholder="gk-ai-..."
-                autoFocus={!initialKey}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                onChange={(event) => {
-                  setKey(event.target.value);
-                  setCopyStatus("");
-                }}
-              />
+              <div className="key-reveal-field">
+                <input
+                  type={visible ? "text" : "password"}
+                  value={key}
+                  placeholder={keyLoading ? t("loading") : "gk-ai-..."}
+                  disabled={keyLoading}
+                  autoFocus={!initialKey}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setKey(event.target.value);
+                    setCopyStatus("");
+                  }}
+                />
+                <button
+                  type="button"
+                  title={t(visible ? "hideKey" : "revealKey")}
+                  aria-label={t(visible ? "hideKey" : "revealKey")}
+                  onClick={() => setVisible(!visible)}
+                >
+                  {visible ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={!key.trim()}
+                  title={t("copy")}
+                  aria-label={t("copy")}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(key);
+                      setCopyStatus("key");
+                    } catch {
+                      setCopyStatus("error");
+                    }
+                  }}
+                >
+                  <Copy size={17} />
+                </button>
+              </div>
               <small>{t("usageKeyHint")}</small>
+              {keyError && (
+                <small className={legacy ? "" : "error-hint"} role="status">
+                  {t(keyError)}
+                </small>
+              )}
+              {legacy && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!key.trim() || keyLoading}
+                  onClick={async () => {
+                    setKeyLoading(true);
+                    setKeyError("");
+                    try {
+                      const result = await loadKey(key.trim());
+                      setKey(result.key);
+                      setLegacy(false);
+                    } catch (error) {
+                      setKeyError(
+                        error instanceof Error
+                          ? error.message
+                          : "unexpected_error",
+                      );
+                    } finally {
+                      setKeyLoading(false);
+                    }
+                  }}
+                >
+                  {t("rememberOriginalKey")}
+                </button>
+              )}
             </label>
             <label>
               {t("model")}
@@ -112,7 +212,7 @@ export function KeyUsageDialog({
               {t("copyCommandFailed")}
             </p>
           )}
-          {copyStatus === "success" && (
+          {["success", "key"].includes(copyStatus) && (
             <p className="usage-copy-status" role="status">
               {t("copied")}
             </p>

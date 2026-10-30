@@ -235,3 +235,23 @@ func TestPricingSyncBusyAndUnsupported(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+
+func TestStandardCacheWritePricingSync(t *testing.T) {
+	a, _ := testApp(t)
+	fixture := `# Pricing
+### Standard pricing data
+| Model | Short context input | Short context output | Short context cached input | Short context 30m write | Short context 12h write | Long context input | Long context output | Long context cached input | Long context 30m write | Long context 12h write |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| write-model | $1 | $8 | $0.1 | $1.25 | $2.5 | $2 | $16 | $0.2 | $2.5 | $5 |
+Short context: ≤272K input tokens. Long context: >272K input tokens.
+`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fixture) }))
+	defer up.Close()
+	if n, err := a.syncPricing(context.Background(), "openai", up.URL); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	var short30m, short12h, long30m, long12h string
+	if err := a.DB.QueryRow(context.Background(), "SELECT cache_write_30m_price::text,cache_write_12h_price::text,long_cache_write_30m_price::text,long_cache_write_12h_price::text FROM model_pricing WHERE model='write-model'").Scan(&short30m, &short12h, &long30m, &long12h); err != nil || short30m != "1.2500000000" || short12h != "2.5000000000" || long30m != "2.5000000000" || long12h != "5.0000000000" {
+		t.Fatal("cache write rates lost during sync", err)
+	}
+}

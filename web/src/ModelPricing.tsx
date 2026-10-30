@@ -239,7 +239,34 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                       ? money(row.output_price)
                       : t("notApplicable")}
                   </td>
-                  <td>{money(row.cached_input_price)}</td>
+                  <td>
+                    {money(row.cached_input_price)}
+                    {row.cache_write_30m_price != null && (
+                      <details className="price-write-details">
+                        <summary>{t("cacheWrites")}</summary>
+                        <small>
+                          {t("cacheWrite30m")}:{" "}
+                          {money(row.cache_write_30m_price)}
+                        </small>
+                        <small>
+                          {t("cacheWrite12h")}:{" "}
+                          {money(row.cache_write_12h_price)}
+                        </small>
+                        {row.long_context_policy === "tiered" && (
+                          <>
+                            <small>
+                              {t("longInputPrice")} · {t("cacheWrite30m")}:{" "}
+                              {money(row.long_cache_write_30m_price)}
+                            </small>
+                            <small>
+                              {t("longInputPrice")} · {t("cacheWrite12h")}:{" "}
+                              {money(row.long_cache_write_12h_price)}
+                            </small>
+                          </>
+                        )}
+                      </details>
+                    )}
+                  </td>
                   <td>
                     {row.long_context_policy === "tiered"
                       ? t(

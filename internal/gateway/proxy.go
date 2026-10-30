@@ -23,6 +23,7 @@ func (a *App) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	path := r.URL.Path
 	model, pin, responseID := "", "", ""
+	serviceTier := ""
 	var body []byte
 	isResponse := false
 	if r.Method == "POST" && (path == "/v1/chat/completions" || path == "/v1/embeddings" || path == "/v1/responses") {
@@ -38,6 +39,7 @@ func (a *App) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.Unmarshal(v["model"], &model)
+		_ = json.Unmarshal(v["service_tier"], &serviceTier)
 		if model == "" {
 			writeError(w, 400, "model_required")
 			return
@@ -102,6 +104,7 @@ func (a *App) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		attempted[u.ID] = true
+		u.ServiceTier = serviceTier
 		upstreamPath := path
 		if r.URL.RawQuery != "" {
 			q, e := url.ParseQuery(r.URL.RawQuery)

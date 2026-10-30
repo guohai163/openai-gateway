@@ -13,7 +13,8 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销。`*` 表示所有当前可用模型。
 - Chat Completions、Embeddings、Responses 和 SSE；Responses 资源归属及多轮上下文持久化绑定。
 - 按上游 Key 记录额度阻断、认证错误与限流，支持定时小额探测自动恢复。
-- AES-256-GCM 加密上游凭据；私有 Key 保存 SHA-256 哈希；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
+- AES-256-GCM 加密上游凭据和私有 Key；私有 Key 另存 SHA-256 哈希用于认证，支持管理员回显；管理员密码 bcrypt；服务端会话、CSRF 和登录限速。
+- 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
 - 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。只记录调用元数据，不保存对话正文。
 
 ## 使用 CI 镜像运行（推荐）
@@ -77,6 +78,27 @@ docker compose up -d
 
 `TRUSTED_PROXIES` 必须配置为 Go 服务实际看到的反向代理来源 CIDR；Docker 转发后可能是 Docker 网桥地址。仅添加精确代理地址，并确保 8080 不能被其他来源绕过代理访问。留空时忽略转发头，以 TCP 来源 IP 校验白名单。Nginx 示例覆盖客户端自带的 `X-Forwarded-For`；可信代理链从右向左解析，遇到首个非可信地址即停止。
 
+### Nginx 前面还有 PROXY protocol 负载均衡
+
+对于 `listen 443 ssl proxy_protocol`，还需要让 Nginx 使用 PROXY protocol 的客户端地址替换 `$remote_addr`。完整示例见 [deploy/nginx-proxy-protocol.conf](deploy/nginx-proxy-protocol.conf)，已包含你的 `gyai.dev` 域名与 SSE 设置。
+
+```nginx
+# 仅信任实际向 Nginx 发送 PROXY protocol 的负载均衡器地址，示例须替换。
+set_real_ip_from 192.0.2.10/32;
+real_ip_header proxy_protocol;
+
+# 放在 location / 中。覆盖外部客户端自带的转发头。
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_buffering off;
+proxy_read_timeout 660s;
+```
+
+网关 `.env` 的 `TRUSTED_PROXIES` 则配置 **Nginx 到网关这一跳的来源地址**，例如固定的 Nginx 容器地址 `172.30.0.2/32`（须替换为实际值），修改后重新创建网关容器。Nginx 必须启用 `http_realip_module`，其 443 端口仅允许可信负载均衡器访问。只有前置负载均衡器确实发送 PROXY protocol 时，才使用这个 `listen` 配置。参考：[Nginx Real IP 官方文档](https://nginx.org/en/docs/http/ngx_http_realip_module.html)。
+
+Nginx 和网关在 Docker 中时须加入同一网络；示例 `openai-gateway:8080` 应能从 Nginx 容器解析，使用本仓库 Compose 的服务名时可改为 `gateway:8080`。网关从右向左解析可信链；没有 `X-Forwarded-For` 时，才接受可信来源的 `X-Real-IP`。不在 `TRUSTED_PROXIES` 中的请求会忽略这两个头。调用记录、IP 白名单和后台自动填入的来源 IP 共用同一解析逻辑。
+
 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 只用于空数据库的首次初始化，不会在重启时覆盖已有账号。重启、更新镜像时必须保留原来的 `MASTER_KEY` 和数据库卷。
 
 ### 3. 常用运行命令
@@ -103,9 +125,11 @@ docker compose down
 
 1. 添加上游密钥，填写名称和普通 OpenAI API Key。系统仅使用该 Key 查询模型列表，不发送组织或项目头；成功后加入共享调度池。点击模型数量可以查看完整模型列表和原始响应。
 2. 如需额度恢复探测，在该上游 Key 中填写可用且支持 Responses 的探测模型。留空不影响正常推理，但不会发起恢复探测。
-3. 颁发私有 Key，名称仅支持小写字母、数字和连字符（`-`），最多 120 个字符；IP 白名单默认按当前请求者 IPv4 `/24` 或 IPv6 `/64` 自动填写，可手动修改。从全部已同步上游 Key 的模型去重列表中搜索、多选，或选择全部模型。有效期仅支持 30、90、120 天，默认 30 天，从创建或续期时计算。新密钥统一以 `gk-ai-` 开头，明文只展示一次；客户端 `base_url` 使用 `https://你的域名/v1`。
+3. 颁发私有 Key，名称仅支持小写字母、数字和连字符（`-`），最多 120 个字符；IP 白名单默认按当前请求者 IPv4 `/24` 或 IPv6 `/64` 自动填写，可手动修改。从全部已同步上游 Key 的模型去重列表中搜索、多选，或选择全部模型。有效期仅支持 30、90、120 天，默认 30 天，从创建或续期时计算。新密钥统一以 `gk-ai-` 开头，管理员可在操作栏点击“显示密钥”再次查看或复制；客户端 `base_url` 使用 `https://你的域名/v1`。
 
-私有密钥操作栏和新密钥弹窗均提供“如何使用”，可生成发送 `hi` 的 curl 示例，自动使用当前网关地址。刚创建的密钥会直接带入示例；之后可填写保存的完整密钥，或通过 `GATEWAY_API_KEY` 环境变量使用。密钥输入仅保留在当前弹层，不会保存或上传。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
+私有密钥操作栏和新密钥弹窗均提供“如何使用”，自动填入完整密钥和当前网关地址，生成发送 `hi` 的 curl 示例。密钥输入框支持显示、隐藏及复制；明文只存在当前弹层内存中，不写入浏览器持久存储。模型可修改，未授权或未同步时会提示；从 IP 白名单允许的设备执行命令。既有旧前缀密钥仍可正常认证。
+
+升级前只保存了哈希的旧私有 Key 无法从数据库还原。旧 Key 下次通过认证及 IP 白名单检查时，会自动补存 AES-GCM 加密副本；也可在“如何使用”中粘贴原密钥并点击“验证并保存原密钥”，服务器验证哈希匹配后保存。无需轮换密钥。无法获取原密钥且客户端也不再持有时，需要重新创建密钥。删除私有 Key 会同时清除加密副本。
 
 `0.0.0.0/32` 只允许来源地址恰好为 `0.0.0.0` 的请求，并不表示全部地址。允许所有 IPv4 地址使用 `0.0.0.0/0`，所有 IPv6 地址使用 `::/0`，也可填写实际来源 IP 或网段；两种地址族分别匹配。认证成功但白名单拒绝时，错误响应的 `error.client_ip` 返回网关识别到的来源 IP，便于核对。
 
@@ -147,6 +171,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
 - 私有 Key 使用 `models` 数组设置模型权限；`["*"]` 表示全部当前及未来可用模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
 - `GET /logs|audit`；列表支持 `limit`（1–500）、`offset`。
+- `POST /gateway_keys/{id}/reveal` 在管理员会话及 CSRF 校验后返回明文，响应带 `Cache-Control: no-store`；请求体 `{}`，或 `{"key":"原密钥"}` 验证补录旧密钥。列表只返回 `can_reveal`，不返回哈希或密文。回显和补录操作保存管理审计，不记录密钥值。
 - `DELETE /gateway_keys/{id}` 删除私有密钥，要求管理员会话和 CSRF。删除会撤销原凭据、停用并隐藏该密钥，保留历史调用、用量与 Responses 归属；已删除密钥不可通过编辑重新启用。
 
 网关错误格式：`{"error":{"message":"model_not_allowed","type":"gateway_error","param":null,"code":"model_not_allowed"}}`。客户端应读取稳定的 `error.code`；后台将已知错误映射为所选语言。
@@ -161,11 +186,23 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 上游 `/v1/models` 同步成功时自动建立尚未匹配价格的记录。价格按精确模型 ID 匹配，不用名称前缀推断快照模型的价格；缺失价格、当前来源未再匹配或上下文规则无法确认的记录标红，支持筛选查看。
 - 页面分别显示官方已公布价格和是否已在本机上游模型列表中发现。模型没有价格不会阻止正常转发，也不会被当作免费模型。
 - 同步以事务更新，平台互不覆盖。网络失败、页面结构不再识别或出现相互冲突的 Standard 价格时保留旧数据并显示错误；官方网页解析并非官方价格 API。
-- Batch、Flex、Fast、图像、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；这里只维护价格资料，不增加收费或扣减逻辑。
+- Batch、Flex、Fast、图像、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；不会对私有 Key 执行收费或扣减。官方公布的 30 分钟及 12 小时缓存写入单价会一并同步保存。
 
 管理接口：`GET /admin/api/pricing?platform=openai&q=模型ID&missing=true&limit=100&offset=0`；`POST /admin/api/pricing/sync?platform=openai`。均需管理员会话，手动同步还需 CSRF Token；平台同步记录保存在 `model_pricing_sync` 表。
 
 本次迁移 `007_model_pricing.sql` 自动创建定价表并为已有模型建立待定价记录；网关项目管理接口和菜单已移除，旧项目资料归档为 `archived_gateway_projects`，上游请求完全使用密钥自身范围。历史迁移文件仍保留，保证从早期版本升级可重放迁移。升级保持原数据卷和 `MASTER_KEY`，无须重新导入密钥。
+
+## 调用记录：费用与缓存
+
+- 输入 Token 使用绿色向下箭头、输出 Token 使用紫色向上箭头；展示各自金额及合计。点击费用旁的信息图标，展开本次调用的单位价格、缓存费用和长上下文档位。
+- 价格按请求的 `(platform, model)` 精确匹配并保存快照；实际返回模型 ID 也会保留。金额使用 `NUMERIC(30,16)`，计算过程不使用浮点数。后续同步单价不会修改历史金额。
+- 输入费用 = 普通输入 Token × 输入单价 + 缓存读取 Token × 缓存输入单价 + 各有效期缓存写入 Token × 对应写入单价，再除以一百万；输出费用按输出 Token 和对应档位输出单价计算。缓存 Token 包含在总输入中，不会重复计费。长上下文阈值使用总输入 Token（含缓存），超过阈值后输入和输出均使用长上下文单价。
+- Responses 读取 `usage.input_tokens_details.cached_tokens`，Chat Completions 读取 `usage.prompt_tokens_details.cached_tokens`：大于零标记“缓存命中”并显示 Token 数；明确为零标记“未命中缓存”；未返回字段显示“缓存未知”。向量接口显示“缓存不适用”。这是 OpenAI 上游的提示词缓存，网关没有缓存对话正文。参考：[官方 Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
+- 普通及 SSE 响应都会旁读用量。Chat Completions 流式请求应设置 `stream_options: {"include_usage": true}`；客户端断开或上游没有返回完整用量时，不推算缺失 Token、缓存命中或金额。接口转发内容保持原样。
+- 缓存写入返回有效期明细时，分别计算 `ttl_30m_tokens` / `ttl_12h_tokens`；未提供有效期或缺少对应单价时，输入费用显示未知。Batch/Flex/Fast 等不支持的服务档位、多模态价格、工具调用费和协议中未返回的其他费用不混入文本估算；以 OpenAI 官方账单为准。
+- 重复查询、恢复流及同一 Response 的并发读取不会重复累计，页面标记“用量已计入原记录”。旧调用记录没有可靠的缓存字段及价格快照，保留原始 Token 计数，费用显示未知，不按今天的价格回填。
+
+升级迁移 `008_request_costs_and_key_reveal.sql` 自动增加私有 Key 密文、缓存写入单价和调用价格快照字段。更新镜像后请到“模型定价”手动同步一次，补全新增写入单价；保留原 `MASTER_KEY` 和数据库卷。
 
 ## 调度、额度与统计
 
@@ -174,7 +211,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 仅上游明确拒绝的认证、额度、限流及模型不存在错误可触发候选切换。网络超时、5xx 或流已开始均不自动重放，避免重复执行或收费。
 - `credit_balance_exhausted`、组织/项目支出限制和 `insufficient_quota` 均只阻断返回错误的 Key，不影响其他 Key。限流按 Key + 模型冷却并遵守 `Retry-After`；没有上游组织归属信息时，不推断多个 Key 的共享额度。
 - 恢复探测按受阻 Key 执行；失败后间隔为 5、10、20、40、60 分钟并封顶。探测模型由该 Key 配置，必须支持 Responses，并限制 `max_output_tokens=64`、`store=false`。探测会产生少量费用，记录为“恢复探测”；手动停用和凭据无效不自动恢复。
-- 概览和调用记录仅统计本网关返回的 Token usage；流式接口缺少终态 usage 时不估算。Response 轮询及重复流按 Response ID 去重。不查询或展示余额、官方账单及费用。
+- 概览和调用记录仅统计本网关返回的 Token usage；流式接口缺少终态 usage 时不估算。Response 轮询及重复流按 Response ID 去重，Token 与费用记录在同一事务中提交。不查询余额或官方账单；页面费用为本地估算。
 
 官方参考：[模型列表](https://developers.openai.com/api/reference/resources/models/methods/list)、[错误码](https://developers.openai.com/api/docs/guides/error-codes)。
 
@@ -261,7 +298,7 @@ TEST_DATABASE_URL='postgresql://user:password@localhost:5432/testdb?sslmode=disa
 
 ## 备份与恢复
 
-数据库卷保存配置、密钥密文、会话、响应归属、日志与统计。必须同时保管 `MASTER_KEY`；丢失后无法解密上游凭据。
+数据库卷保存配置、密钥密文、会话、响应归属、日志与统计。必须同时保管 `MASTER_KEY`；丢失后无法解密上游凭据或回显私有密钥（私有密钥仍可通过哈希认证）。
 
 ```sh
 docker compose exec -T postgres pg_dump -U gyai -d gyai -Fc > gyai.dump

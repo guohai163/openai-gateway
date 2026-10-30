@@ -4,6 +4,42 @@ export function resolveLanguage(preference, languages = ["en"]) {
 }
 export const messages = {
   en: {
+    costUnavailable: "Cost unavailable",
+    cacheWriteIncluded: "Cache writes (included)",
+    cacheWrite30m: "30-minute cache write",
+    cacheWrite12h: "12-hour cache write",
+    revealKey: "Reveal key",
+    hideKey: "Hide key",
+    rememberOriginalKey: "Verify & save original key",
+    key_not_recoverable:
+      "This older key has only a hash. Paste the original and save it, or use it successfully once to enable automatic fill.",
+    key_mismatch: "This is not the original key for this record.",
+    key_decryption_failed:
+      "Unable to decrypt this key. Check the deployment MASTER_KEY.",
+    token_usage: "Tokens / cache",
+    request_cost: "Token cost",
+    cacheHit: "Cache hit",
+    cacheMiss: "No cache hit",
+    cacheUnknown: "Cache unknown",
+    cacheNotApplicable: "Cache N/A",
+    cacheWrites: "Cache write tokens",
+    usage_duplicate: "Usage already counted",
+    estimatedCost: "Estimated · USD",
+    partialEstimate: "Partial estimate · USD",
+    cachedInputIncluded: "Cached input (included)",
+    tokenCostEstimate: "Token cost breakdown",
+    longContextApplied: "Long-context rates applied to input and output.",
+    responseModel: "Returned model",
+    costEstimateHint:
+      "Public text token rates at request time; excludes tools and other charges. Not an official invoice.",
+    price_missing_or_stale: "No current matching price is available.",
+    long_context_unknown: "Long-context pricing rules are unknown.",
+    unsupported_service_tier: "This service tier has no supported price.",
+    non_text_usage: "Audio/image/video usage requires separate pricing.",
+    cache_write_price_missing:
+      "Cache write pricing or lifetime usage is unavailable.",
+    cache_usage_missing: "Upstream did not report cache details.",
+    usage_missing: "Upstream did not report complete usage.",
     pricing: "Model pricing",
     platform: "Platform",
     pricingScope: "Standard text & embedding rates · USD / 1M tokens",
@@ -131,7 +167,8 @@ export const messages = {
     probeKind: "Recovery probe",
     endpoint: "Endpoint",
     newKey: "Your new private key",
-    keyOnce: "Copy this key now. It will not be shown again.",
+    keyOnce:
+      "This key is encrypted in the database. You can reveal it again from the private keys page.",
     copy: "Copy key",
     copied: "Copied",
     howToUse: "How to use",
@@ -146,7 +183,7 @@ export const messages = {
       "Send hi with curl from an IP allowed by this key. The gateway address is filled in automatically; you can change the model below.",
     usagePrivateKey: "Private API key",
     usageKeyHint:
-      "Paste the full key you saved when it was created. It is used only in this dialog and is not saved or uploaded.",
+      "The saved key is filled in automatically. Reveal or copy it here; closing the dialog clears it from this view.",
     usageEnvironmentHint:
       "You can also leave the key empty and set GATEWAY_API_KEY in your terminal before running the example.",
     usageModelNotAllowed:
@@ -241,6 +278,41 @@ export const messages = {
     model_sync_error: "Model sync status",
   },
   zh: {
+    costUnavailable: "费用未知",
+    cacheWriteIncluded: "其中：缓存写入",
+    cacheWrite30m: "30 分钟缓存写入",
+    cacheWrite12h: "12 小时缓存写入",
+    revealKey: "显示密钥",
+    hideKey: "隐藏密钥",
+    rememberOriginalKey: "验证并保存原密钥",
+    key_not_recoverable:
+      "此旧密钥只保存了哈希。填入原密钥并验证保存，或成功使用一次后，即可自动回显。",
+    key_mismatch: "填写的密钥与本条记录不匹配。",
+    key_decryption_failed: "密钥解密失败，请检查部署时的 MASTER_KEY。",
+    token_usage: "Token / 缓存",
+    request_cost: "Token 费用",
+    cacheHit: "缓存命中",
+    cacheMiss: "未命中缓存",
+    cacheUnknown: "缓存未知",
+    cacheNotApplicable: "缓存不适用",
+    cacheWrites: "缓存写入 Token",
+    usage_duplicate: "用量已计入原记录",
+    estimatedCost: "估算费用 · USD",
+    partialEstimate: "部分费用已知 · USD",
+    cachedInputIncluded: "其中：缓存输入",
+    tokenCostEstimate: "Token 费用明细",
+    longContextApplied: "已按长上下文档位计算输入和输出费用。",
+    responseModel: "实际返回模型",
+    costEstimateHint:
+      "按调用时公开文本单价估算，不含工具等其他费用，以官方账单为准。",
+    price_missing_or_stale: "缺少当前有效的匹配单价。",
+    long_context_unknown: "长上下文计价规则未知。",
+    unsupported_service_tier: "此服务档位的价格暂未支持。",
+    non_text_usage: "音频、图像或视频用量需按单独单价计费。",
+    cache_write_price_missing:
+      "上游返回了缓存写入用量，但缺少对应单价或有效期明细。",
+    cache_usage_missing: "上游未返回缓存用量明细。",
+    usage_missing: "上游未返回完整用量。",
     pricing: "模型定价",
     platform: "平台",
     pricingScope: "Standard 文本与向量定价 · 美元 / 百万 Token",
@@ -363,7 +435,7 @@ export const messages = {
     probeKind: "恢复探测",
     endpoint: "接口",
     newKey: "新私有密钥",
-    keyOnce: "请立即复制保存，此密钥不会再次展示。",
+    keyOnce: "密钥已加密保存，可在私有密钥页面再次查看。",
     copy: "复制密钥",
     copied: "已复制",
     howToUse: "如何使用",
@@ -378,7 +450,7 @@ export const messages = {
       "请从 IP 白名单允许的设备使用 curl 发送 hi。示例自动使用当前网关地址，可在下方修改模型。",
     usagePrivateKey: "私有 API 密钥",
     usageKeyHint:
-      "请填入创建时保存的完整密钥，仅在当前弹层使用，不会保存或上传。",
+      "已自动填写保存的密钥，可点击查看或复制，关闭弹层即清除本次展示。",
     usageEnvironmentHint:
       "也可留空，先在终端设置 GATEWAY_API_KEY 环境变量后再运行示例。",
     usageModelNotAllowed:

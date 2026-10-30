@@ -16,12 +16,13 @@ import (
 const openAIPricingURL = "https://developers.openai.com/api/docs/pricing.md"
 
 type modelPrice struct {
-	Model                             string
-	Input, Output, Cached             *string
-	OutputApplicable                  bool
-	LongPolicy                        string
-	Threshold                         *int64
-	LongInput, LongOutput, LongCached *string
+	Model                                          string
+	Input, Output, Cached                          *string
+	OutputApplicable                               bool
+	LongPolicy                                     string
+	Threshold                                      *int64
+	LongInput, LongOutput, LongCached              *string
+	Write30m, Write12h, LongWrite30m, LongWrite12h *string
 }
 
 var decimalPrice = regexp.MustCompile(`^\$([0-9]+(?:\.[0-9]{1,10})?)$`)
@@ -202,6 +203,22 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 		} else if rowThreshold.MatchString(columns["Model"]) {
 			p.LongPolicy = "unknown"
 		}
+		writeColumns := []struct {
+			name   string
+			target **string
+		}{
+			{"Short context 30m write", &p.Write30m}, {"Short context 12h write", &p.Write12h},
+			{"Long context 30m write", &p.LongWrite30m}, {"Long context 12h write", &p.LongWrite12h},
+		}
+		for _, column := range writeColumns {
+			if v := columns[column.name]; v != "" {
+				price, valid := parsePrice(v)
+				if !valid {
+					return nil, errors.New("pricing_format_changed")
+				}
+				*column.target = price
+			}
+		}
 		if old, exists := prices[name]; exists {
 			a, _ := json.Marshal(old)
 			b, _ := json.Marshal(p)
@@ -273,9 +290,9 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 		return 0, e
 	}
 	for _, p := range prices {
-		_, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,input_price,output_price,cached_input_price,output_applicable,long_context_policy,long_context_threshold,long_input_price,long_output_price,long_cached_input_price,source_url,source_current,synced_at)
- VALUES($1,$2,$3::numeric,$4::numeric,$5::numeric,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12,true,now())
- ON CONFLICT(platform,model) DO UPDATE SET input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,cached_input_price=EXCLUDED.cached_input_price,output_applicable=EXCLUDED.output_applicable,long_context_policy=EXCLUDED.long_context_policy,long_context_threshold=EXCLUDED.long_context_threshold,long_input_price=EXCLUDED.long_input_price,long_output_price=EXCLUDED.long_output_price,long_cached_input_price=EXCLUDED.long_cached_input_price,source_url=EXCLUDED.source_url,source_current=true,synced_at=now()`, platform, p.Model, p.Input, p.Output, p.Cached, p.OutputApplicable, p.LongPolicy, p.Threshold, p.LongInput, p.LongOutput, p.LongCached, openAIPricingURL)
+		_, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,input_price,output_price,cached_input_price,output_applicable,long_context_policy,long_context_threshold,long_input_price,long_output_price,long_cached_input_price,source_url,source_current,synced_at,cache_write_30m_price,cache_write_12h_price,long_cache_write_30m_price,long_cache_write_12h_price)
+ VALUES($1,$2,$3::numeric,$4::numeric,$5::numeric,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12,true,now(),$13::numeric,$14::numeric,$15::numeric,$16::numeric)
+ ON CONFLICT(platform,model) DO UPDATE SET input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,cached_input_price=EXCLUDED.cached_input_price,output_applicable=EXCLUDED.output_applicable,long_context_policy=EXCLUDED.long_context_policy,long_context_threshold=EXCLUDED.long_context_threshold,long_input_price=EXCLUDED.long_input_price,long_output_price=EXCLUDED.long_output_price,long_cached_input_price=EXCLUDED.long_cached_input_price,source_url=EXCLUDED.source_url,source_current=true,synced_at=now(),cache_write_30m_price=EXCLUDED.cache_write_30m_price,cache_write_12h_price=EXCLUDED.cache_write_12h_price,long_cache_write_30m_price=EXCLUDED.long_cache_write_30m_price,long_cache_write_12h_price=EXCLUDED.long_cache_write_12h_price`, platform, p.Model, p.Input, p.Output, p.Cached, p.OutputApplicable, p.LongPolicy, p.Threshold, p.LongInput, p.LongOutput, p.LongCached, openAIPricingURL, p.Write30m, p.Write12h, p.LongWrite30m, p.LongWrite12h)
 		if e != nil {
 			return 0, e
 		}
@@ -289,7 +306,7 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 	return len(prices), tx.Commit(ctx)
 }
 
-const pricingRows = `SELECT p.platform,p.model,p.currency,p.price_unit,p.service_tier,p.output_applicable,p.long_context_policy,p.long_context_threshold,p.long_context_surcharge,p.source_url,p.source_current,p.synced_at,p.created_at,p.input_price::text AS input_price,p.output_price::text AS output_price,p.cached_input_price::text AS cached_input_price,p.long_input_price::text AS long_input_price,p.long_output_price::text AS long_output_price,p.long_cached_input_price::text AS long_cached_input_price,
+const pricingRows = `SELECT p.platform,p.model,p.currency,p.price_unit,p.service_tier,p.output_applicable,p.long_context_policy,p.long_context_threshold,p.long_context_surcharge,p.source_url,p.source_current,p.synced_at,p.created_at,p.input_price::text AS input_price,p.output_price::text AS output_price,p.cached_input_price::text AS cached_input_price,p.long_input_price::text AS long_input_price,p.long_output_price::text AS long_output_price,p.long_cached_input_price::text AS long_cached_input_price,p.cache_write_30m_price::text AS cache_write_30m_price,p.cache_write_12h_price::text AS cache_write_12h_price,p.long_cache_write_30m_price::text AS long_cache_write_30m_price,p.long_cache_write_12h_price::text AS long_cache_write_12h_price,
  EXISTS(SELECT 1 FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.platform=p.platform AND m.model=p.model) AS in_catalog,
  CASE WHEN p.input_price IS NULL OR (p.output_applicable AND p.output_price IS NULL) THEN 'missing' WHEN NOT p.source_current THEN 'stale' WHEN p.long_context_policy='unknown' THEN 'partial' ELSE 'ready' END AS price_status FROM model_pricing p`
 

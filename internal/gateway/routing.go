@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,12 +10,12 @@ import (
 )
 
 type Upstream struct {
-	ID, Model, ProbeModel string
-	Secret                []byte
+	ID, Model, ProbeModel, Platform, ServiceTier string
+	Secret                                       []byte
 }
 
 const upstreamJoins = `FROM upstream_keys k `
-const selectUpstream = `SELECT k.id,k.secret,k.probe_model ` + upstreamJoins
+const selectUpstream = `SELECT k.id,k.secret,k.probe_model,k.platform ` + upstreamJoins
 const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
@@ -28,7 +27,7 @@ func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, er
 	out := []Upstream{}
 	for rows.Next() {
 		var u Upstream
-		if e = rows.Scan(&u.ID, &u.Secret, &u.ProbeModel); e != nil {
+		if e = rows.Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform); e != nil {
 			return nil, e
 		}
 		u.Model = model
@@ -117,58 +116,4 @@ func (a *App) bind(ctx context.Context, k GatewayKey, u Upstream, id, model stri
 	}
 	e := a.DB.QueryRow(ctx, `INSERT INTO response_bindings(response_id,gateway_key_id,upstream_key_id,model) VALUES($1,$2,$3,$4) ON CONFLICT(response_id) DO UPDATE SET response_id=EXCLUDED.response_id WHERE response_bindings.gateway_key_id=EXCLUDED.gateway_key_id AND response_bindings.upstream_key_id=EXCLUDED.upstream_key_id RETURNING response_id`, id, k.ID, u.ID, model).Scan(&id)
 	return e
-}
-
-type Usage struct {
-	Input  int64 `json:"input_tokens"`
-	Output int64 `json:"output_tokens"`
-	Cached int64 `json:"cached_tokens"`
-}
-
-func usageFrom(v map[string]any) Usage {
-	us, _ := v["usage"].(map[string]any)
-	if us == nil {
-		return Usage{}
-	}
-	n := func(k string) int64 { f, _ := us[k].(float64); return int64(f) }
-	u := Usage{Input: n("input_tokens"), Output: n("output_tokens")}
-	if _, ok := us["prompt_tokens"]; ok {
-		u.Input = n("prompt_tokens")
-		u.Output = n("completion_tokens")
-	}
-	if _, ok := us["total_tokens"]; ok && u.Input == 0 {
-		u.Input = n("total_tokens") - u.Output
-	}
-	for _, key := range []string{"input_tokens_details", "prompt_tokens_details"} {
-		if d, ok := us[key].(map[string]any); ok {
-			if n, ok := d["cached_tokens"].(float64); ok {
-				u.Cached = int64(n)
-			}
-		}
-	}
-	return u
-}
-func (a *App) record(ctx context.Context, k GatewayKey, u Upstream, method, path string, status int, code string, start time.Time, usage Usage, responseID string, attempt int, kind string) {
-	// Response polling and resumed streams must never duplicate token accounting.
-	if responseID != "" && (usage.Input != 0 || usage.Output != 0) {
-		tag, e := a.DB.Exec(ctx, `INSERT INTO response_usage(response_id,gateway_key_id,upstream_key_id,input_tokens,output_tokens,cached_tokens) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(response_id) DO NOTHING`, responseID, k.ID, u.ID, usage.Input, usage.Output, usage.Cached)
-		if e != nil || tag.RowsAffected() == 0 {
-			usage = Usage{}
-		}
-	}
-	var keyID, upstreamID any
-	if k.ID != "" {
-		keyID = k.ID
-	}
-	if u.ID != "" {
-		upstreamID = u.ID
-	}
-	ip := "127.0.0.1"
-	if k.IP.IsValid() {
-		ip = k.IP.String()
-	}
-	_, e := a.DB.Exec(ctx, `INSERT INTO request_logs(id,gateway_key_id,upstream_key_id,model,method,endpoint,ip,status,error_code,duration_ms,input_tokens,output_tokens,cached_tokens,response_id,attempt,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, newID(), keyID, upstreamID, u.Model, method, path, ip, status, code, time.Since(start).Milliseconds(), usage.Input, usage.Output, usage.Cached, responseID, attempt, kind)
-	if e != nil {
-		slog.Error("request metadata persistence failed")
-	}
 }

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Copy,
   Database,
+  Eye,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -36,6 +37,7 @@ import {
   themeStorageKey,
 } from "./theme.mjs";
 import { ModelPricing } from "./ModelPricing";
+import { RequestTokens, RequestCost } from "./RequestUsage";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -426,15 +428,15 @@ function App() {
     gateway_keys: ["name", "models", "cidrs", "status", "expires_at"],
     logs: [
       "created_at",
+      "model",
+      "status",
+      "token_usage",
+      "request_cost",
+      "ip",
+      "duration_ms",
       "gateway_name",
       "upstream_name",
-      "model",
       "endpoint",
-      "ip",
-      "status",
-      "duration_ms",
-      "input_tokens",
-      "output_tokens",
       "error_code",
       "kind",
     ],
@@ -442,6 +444,10 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "token_usage")
+      return <RequestTokens row={r} locale={locale} t={t} />;
+    if (c === "request_cost")
+      return <RequestCost row={r} locale={locale} t={t} />;
     if (c === "status")
       return page === "logs" ? (
         <span className={`http-status ${v < 400 ? "success" : "failed"}`}>
@@ -768,7 +774,9 @@ function App() {
                 </span>
               </div>
               <div className="table-scroll">
-                <table>
+                <table
+                  className={page === "logs" ? "request-log-table" : undefined}
+                >
                   <thead>
                     <tr>
                       {columns[page]?.map((c) => (
@@ -806,6 +814,19 @@ function App() {
                                 </button>
                                 {page === "gateway_keys" && (
                                   <>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setUsage({
+                                          ...r,
+                                          initialKey: "",
+                                          showKey: true,
+                                        })
+                                      }
+                                    >
+                                      <Eye size={14} />
+                                      {t("revealKey")}
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -1163,6 +1184,13 @@ function App() {
           allowedModels={usage.models || ["*"]}
           availableModels={models.map((row) => row.model)}
           initialKey={usage.initialKey}
+          showKey={usage.showKey}
+          loadKey={(original) =>
+            api(`gateway_keys/${usage.id}/reveal`, {
+              method: "POST",
+              body: JSON.stringify(original ? { key: original } : {}),
+            })
+          }
           onClose={() => setUsage(null)}
           t={t}
         />

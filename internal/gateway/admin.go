@@ -79,6 +79,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 {
+		if resource == "gateway_keys" && parts[2] == "reveal" && r.Method == "POST" {
+			a.revealGatewayKey(w, r, parts[1])
+			return
+		}
 		if resource == "upstream_keys" && parts[2] == "model_catalog" && r.Method == "GET" {
 			var b []byte
 			err := a.DB.QueryRow(r.Context(), "SELECT json_build_object('catalog',model_catalog,'synced_at',model_synced_at) FROM upstream_keys WHERE id=$1", parts[1]).Scan(&b)
@@ -144,7 +148,7 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string) {
 	queries := map[string]string{
 		"upstream_keys": `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
-		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
+		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
 		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
 		"audit":         `SELECT * FROM audit_logs ORDER BY created_at DESC`,
 		"models":        `SELECT DISTINCT model FROM models ORDER BY model`,
@@ -291,7 +295,11 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 		}
 		if create {
 			token = gatewayKeyPrefix + randomToken(32)
-			tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry)
+			var secret []byte
+			secret, e = seal(a.Config.MasterKey, token)
+			if e == nil {
+				tag, e = a.DB.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret)
+			}
 		} else {
 			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry)
 		}
@@ -374,7 +382,7 @@ func (a *App) deleteGatewayKey(w http.ResponseWriter, r *http.Request, id string
 	defer tx.Rollback(ctx)
 	// Destroy the original credential hash as well as disabling the key, so an
 	// accidental enable or rollback to an older binary cannot restore the token.
-	tag, err := tx.Exec(ctx, "UPDATE gateway_keys SET enabled=false,deleted_at=now(),token_hash=$2 WHERE id=$1 AND deleted_at IS NULL", id, hash(randomToken(32)))
+	tag, err := tx.Exec(ctx, "UPDATE gateway_keys SET enabled=false,deleted_at=now(),token_hash=$2,secret=NULL WHERE id=$1 AND deleted_at IS NULL", id, hash(randomToken(32)))
 	if err != nil {
 		adminDBError(w, err)
 		return

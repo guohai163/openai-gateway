@@ -77,8 +77,19 @@ func clientIP(r *http.Request, trusted []netip.Prefix) (netip.Addr, error) {
 	if !contains(trusted, peer) {
 		return peer, nil
 	}
+	// X-Real-IP is a single-hop fallback, accepted only from a trusted peer.
+	// Never fall back from an invalid XFF chain to a different header.
+	if len(r.Header.Values("X-Forwarded-For")) == 0 {
+		if s := strings.TrimSpace(r.Header.Get("X-Real-IP")); s != "" {
+			ip, err := netip.ParseAddr(s)
+			if err != nil {
+				return netip.Addr{}, errors.New("invalid forwarded IP")
+			}
+			return ip.Unmap(), nil
+		}
+	}
 	// Walk from the closest hop; stop at the first untrusted proxy.
-	forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	forwarded := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 	current := peer
 	for i := len(forwarded) - 1; i >= 0; i-- {
 		if !contains(trusted, current) {
