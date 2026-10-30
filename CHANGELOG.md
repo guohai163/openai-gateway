@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.0 - 2026-10-30
+
+### Added
+
+- 支持 `POST /v1/images/generations` 和 `POST /v1/images/edits`，适配 GPT Image 2.5 Flare / Sunburst 等上游已同步模型，沿用私钥、IP 白名单、模型授权及多 Key 调度。
+- 图片生成支持 JSON，编辑支持 JSON 图片引用和 multipart 文件上传。保留原始文件、mask、重复图片字段、boundary 及其他请求参数；两个接口都要求显式指定模型。
+- 图片接口支持 SSE，原样转发 `image_generation.*` / `image_edit.*` 事件，完成事件中的用量进入日志；流中报错不会自动重放生成。
+- 按官方返回的文本输入、图像输入、图像输出 Token 与各自单价计算估算费用，保存分项快照并计入自然月消费；缺价、用量缺失或分项不一致时显示未知/部分费用。直接 GPT Image 2 / 2.5 接口显示缓存不适用。
+- 图片接口沿用可选 S3 输入/输出归档，multipart 输入使用带 Content-Type 的 base64 JSON 封装，保留二进制原文；日志与对象文件名沿用请求 UUID。
+
+### Upgrade
+
+- 无新增数据库迁移。保留原数据库卷与 `MASTER_KEY`，升级后同步模型和价格，并为私有 Key 授权需要的图片模型。
+- 图片请求、普通响应与单个 SSE 事件上限为 128 MiB；上传使用仅当前用户可读写的临时文件，结束后删除。S3 单方向捕获仍为 32 MiB，超限状态不会阻止正常图片转发。
+- 前置 Nginx 将 `client_max_body_size` 更新为 `128m`，参考部署示例；旧文本接口的限制保持不变。Files 管理仍未开放，编辑优先使用文件上传、URL 或 data URL。
+- README 已补充生成、文件编辑和 JSON 编辑的 curl 示例；固定版本镜像为 `ghcr.io/guohai163/openai-gateway:1.6.0`，支持 `linux/amd64` 和 `linux/arm64`。
+
 ## v1.5.0 - 2026-10-30
 
 ### Added

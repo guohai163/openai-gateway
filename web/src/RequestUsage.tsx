@@ -20,7 +20,9 @@ export function RequestTokens({ row, locale, t }: Props) {
   const n = (value: number) => new Intl.NumberFormat(locale).format(value);
   const duplicate = row.usage_accounting === "duplicate";
   const known = row.usage_known;
-  const cacheApplicable = row.endpoint !== "/v1/embeddings";
+  const cacheApplicable =
+    row.endpoint !== "/v1/embeddings" &&
+    row.pricing_snapshot?.cache_applicable !== false;
   const cache = !cacheApplicable
     ? "cacheNotApplicable"
     : row.cached_tokens_known
@@ -100,18 +102,57 @@ export function RequestCost({ row, locale, t }: Props) {
             </span>
           )}
           <hr />
-          <span>
-            {t("inputPrice")}
-            <b>{rate(p.input_price)}</b>
-          </span>
-          <span>
-            {t("outputPrice")}
-            <b>{rate(p.output_price)}</b>
-          </span>
-          <span>
-            {t("cachedInputPrice")}
-            <b>{rate(p.cached_input_price)}</b>
-          </span>
+          {p.image_api ? (
+            <>
+              {Object.entries(p.modality_prices || {}).map(([name, value]) => {
+                const price = value as Record<string, unknown>;
+                return (
+                  <div className="image-cost-rates" key={name}>
+                    <strong>
+                      {t(name === "image" ? "imageTokens" : "textTokens")}
+                    </strong>
+                    <span>
+                      {t("inputPrice")}
+                      <b>{rate(price.input_price)}</b>
+                    </span>
+                    {price.output_applicable === true && (
+                      <span>
+                        {t("outputPrice")}
+                        <b>{rate(price.output_price)}</b>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {p.modality_usage?.input_known && (
+                <small>
+                  {t("textTokens")}:{" "}
+                  {new Intl.NumberFormat(locale).format(
+                    p.modality_usage.text_input_tokens,
+                  )}{" "}
+                  · {t("imageTokens")}:{" "}
+                  {new Intl.NumberFormat(locale).format(
+                    p.modality_usage.image_input_tokens,
+                  )}
+                </small>
+              )}
+            </>
+          ) : (
+            <>
+              <span>
+                {t("inputPrice")}
+                <b>{rate(p.input_price)}</b>
+              </span>
+              <span>
+                {t("outputPrice")}
+                <b>{rate(p.output_price)}</b>
+              </span>
+              <span>
+                {t("cachedInputPrice")}
+                <b>{rate(p.cached_input_price)}</b>
+              </span>
+            </>
+          )}
           {row.cache_write_tokens > 0 && (
             <>
               <span>

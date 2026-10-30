@@ -25,8 +25,19 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	model, pin, responseID := "", "", ""
 	serviceTier := ""
 	var body []byte
+	var imageBody *imageRequest
 	isResponse := false
-	if r.Method == "POST" && (path == "/v1/chat/completions" || path == "/v1/embeddings" || path == "/v1/responses") {
+	if r.Method == "POST" && isImagePath(path) {
+		var status int
+		var code string
+		imageBody, status, code = readImageRequest(w, r)
+		if imageBody == nil {
+			writeError(w, status, code)
+			return
+		}
+		defer imageBody.close()
+		model, serviceTier = imageBody.model, imageBody.tier
+	} else if r.Method == "POST" && (path == "/v1/chat/completions" || path == "/v1/embeddings" || path == "/v1/responses") {
 		var e error
 		body, e = io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 		if e != nil {
@@ -119,6 +130,12 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 502, "upstream_configuration_error")
 			return
 		}
+		if imageBody != nil {
+			req.Body = io.NopCloser(io.NewSectionReader(imageBody.file, 0, imageBody.size))
+			req.ContentLength = imageBody.size
+			req.GetBody = nil
+			req.Header.Set("Content-Type", imageBody.contentType)
+		}
 		resp, e := a.Client.Do(req)
 		if e != nil {
 			a.logAttempt(k, u, r, 502, "upstream_connection_error", start, Usage{}, responseID, attempt)
@@ -151,16 +168,20 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			a.stream(w, r, k, u, resp, isResponse, responseID, attempt, start)
 			return
 		}
-		b, e := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+		limit := maxBody
+		if isImagePath(path) {
+			limit = maxImageBody
+		}
+		b, e := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 		resp.Body.Close()
-		if e != nil || len(b) > maxBody {
+		if e != nil || len(b) > limit {
 			a.logAttempt(k, u, r, 502, "upstream_read_error", start, Usage{}, responseID, attempt)
 			writeError(w, 502, "upstream_read_error")
 			return
 		}
 		var v map[string]any
 		_ = json.Unmarshal(b, &v)
-		usage := usageFrom(v)
+		usage := usageForPath(v, path)
 		if isResponse {
 			if id, ok := v["id"].(string); ok && id != "" {
 				responseID = id
@@ -267,7 +288,7 @@ func (a *App) stream(w http.ResponseWriter, r *http.Request, k GatewayKey, u Ups
 					}
 				}
 				if v["usage"] != nil {
-					usage = usageFrom(v)
+					usage = usageForPath(v, r.URL.Path)
 				}
 				if er, ok := v["error"].(map[string]any); ok {
 					code, _ = er["code"].(string)
@@ -295,7 +316,11 @@ func (a *App) stream(w http.ResponseWriter, r *http.Request, k GatewayKey, u Ups
 	for {
 		line, e := reader.ReadSlice('\n')
 		event = append(event, line...)
-		if len(event) > 8<<20 {
+		eventLimit := 8 << 20
+		if isImagePath(r.URL.Path) {
+			eventLimit = maxImageBody
+		}
+		if len(event) > eventLimit {
 			localError = true
 			code = "upstream_event_too_large"
 			status = 502

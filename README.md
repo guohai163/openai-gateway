@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/gyai-icon.png)
 
-最新版本：[v1.5.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.5.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.5.0`。
+最新版本：[v1.6.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.6.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.6.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -156,13 +156,45 @@ curl https://ai.example.com/v1/responses \
 | `GET /v1/models` | 私有权限与当前可调度模型交集 |
 | `POST /v1/chat/completions` | JSON / SSE |
 | `POST /v1/embeddings` | JSON |
+| `POST /v1/images/generations` | JSON / SSE，图片生成 |
+| `POST /v1/images/edits` | JSON 图片引用或 multipart 文件上传 / SSE，图片编辑 |
 | `POST /v1/responses` | JSON / SSE，支持 `previous_response_id` |
 | `GET, DELETE /v1/responses/{id}` | 绑定原上游并校验私有 Key 归属 |
 | `POST /v1/responses/{id}/cancel` | 取消后台响应 |
 | `GET /v1/responses/{id}/input_items` | 查询输入项，支持分页查询参数 |
 | `GET /healthz` | 数据库健康检查 |
 
-请求体上限 32 MiB；单 SSE 事件上限 8 MiB。客户端断开会取消上游请求。代理不会解析并重写模型输出；仅旁读 ID、usage 和结构化错误。为保持最小权限，不开放 Files、Batch、Conversations 管理或 WebSocket。
+文本接口请求及非流式响应上限 32 MiB，单 SSE 事件上限 8 MiB。Images 接口请求、非流式响应及单 SSE 事件上限分别为 **128 MiB**；此限制针对整个请求，不是每张图片，多个文件合计也需在限制内。图片上传使用权限为 `0600` 的临时文件缓冲，以便在上游明确拒绝后换 Key 重试，请求结束即删除；不会保存到 PostgreSQL。前置 Nginx 需设置 `client_max_body_size 128m`，参考 `deploy/` 示例。客户端断开会取消上游请求。代理不会解析并重写模型输出；仅旁读 ID、usage 和结构化错误。为保持最小权限，不开放 Files、Batch、Conversations 管理或 WebSocket。
+
+### 图片生成与编辑
+
+使用上游模型列表中已同步、且私有 Key 已授权的精确模型 ID，例如 `gpt-image-2.5-flare` 或 `gpt-image-2.5-sunburst`（不是 `gpt-images-2.5`）。两个接口都要求显式传入 `model`，避免上游默认模型变化绕过授权；模型是否可用仍取决于上游 Key 权限。参数、返回图片的 base64 和上游错误保持原样。
+
+```bash
+# 生成图片：返回 JSON；使用 stream:true 可接收原始 SSE 事件。
+curl https://ai.example.com/v1/images/generations \
+  -H "Authorization: Bearer $GYAI_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-image-2.5-flare","prompt":"一只坐在云上的水獭","size":"1024x1024","quality":"high"}'
+
+# 上传参考图片编辑；可重复 image[]，也可添加 -F 'mask=@mask.png'。
+curl https://ai.example.com/v1/images/edits \
+  -H "Authorization: Bearer $GYAI_KEY" \
+  -F 'model=gpt-image-2.5-sunburst' \
+  -F 'image[]=@input.png' \
+  -F 'prompt=把背景改为星空' \
+  -F 'quality=high'
+
+# JSON 编辑支持 URL 或 data URL；网关不下载这些 URL。
+curl https://ai.example.com/v1/images/edits \
+  -H "Authorization: Bearer $GYAI_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-image-2.5-sunburst","images":[{"image_url":"https://example.com/input.png"}],"prompt":"把背景改为星空"}'
+```
+
+multipart 保留原始 boundary、重复图片字段、文件字节、mask 及其他参数；重复 `model` 字段会拒绝。请求按现有模型权限调度，明确的认证/额度/限流拒绝最多切换 3 个不同 Key；开始输出或结果不确定时不重放生成。`stream:true` 时转发 `image_generation.*` / `image_edit.*` 事件，记录完成事件中的用量。流式中断但上游未返回用量时显示未知，不按图片张数猜测 Token。
+
+详见官方 [图片生成接口](https://developers.openai.com/api/reference/resources/images/methods/generate)、[图片编辑接口](https://developers.openai.com/api/reference/resources/images/methods/edit)。Images 的 `file_id` 依赖其上传时的上游 Key 范围；网关尚未代理 Files，也不跨 Key 管理这些 ID，推荐使用 multipart、URL 或 data URL。
 
 Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操作绑定原上游，禁用、额度不足或模型不可用时返回 `503 no_available_upstream`，不会切换账户。只接受本网关生成并登记的 ID。保留上游 `store` 默认行为；使用 `store=false` 时上游可能不支持后续查询或续接，网关不会额外保存上下文。
 
@@ -197,7 +229,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 本次迁移 `007_model_pricing.sql` 自动创建定价表并为已有模型建立待定价记录；网关项目管理接口和菜单已移除，旧项目资料归档为 `archived_gateway_projects`，上游请求完全使用密钥自身范围。历史迁移文件仍保留，保证从早期版本升级可重放迁移。升级保持原数据卷和 `MASTER_KEY`，无须重新导入密钥。
 
-图片模型分项价格由 `009_modality_prices.sql` 增加到现有定价表，更新后手动同步即可补全。`gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 的文本、图像 Token 价格分行显示，缺失分项仍标红。GPT Image 2 / 2.5 的图像缓存单价仅适用于通过 Responses API 生成的图片，详见[官方图片模型价格](https://developers.openai.com/api/docs/pricing#image-generation-models)。当前网关转发接口范围保持不变，图像生成的多模态用量不套用文本费用估算。
+图片模型分项价格由 `009_modality_prices.sql` 增加到现有定价表，更新后手动同步即可补全。`gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 的文本、图像 Token 价格分行显示，缺失分项仍标红。直接 Images API 按 `usage.input_tokens_details.text_tokens`、`image_tokens` 和输出图像 Token 分别计算，快照保留分项价格和用量，计入现有自然月消费及模型统计。缺少或不一致的用量显示未知/部分费用。GPT Image 2 / 2.5 的缓存单价仅适用于 Responses API 的图片工具，直接 Images API 显示“缓存不适用”，参考[官方缓存输入价格说明](https://developers.openai.com/api/docs/guides/image-generation#cached-input-pricing)。Responses/Chat 中无法归属到具体图片模型的多模态用量仍不套用文本费用估算。
 
 ## 调用记录：费用与缓存
 
@@ -360,6 +392,7 @@ REPORT_TIMEZONE=Asia/Shanghai
 - 路径为 `私钥name/YYYY-MM/请求UUID-in.json`、`私钥name/YYYY-MM/请求UUID-out.json`。年月按请求开始时间及 `REPORT_TIMEZONE` 计算，重命名私钥后，历史文件保留旧路径；旧版名称中不适合作为单一路径段的字符会替换为连字符。
 - `X-Gateway-Request-ID` 响应头、调用记录 `request_uuid` 和 S3 对象文件名一致。每条新的调用记录 `id` 也使用 UUID；多个上游重试记录共用一个 `request_uuid`，归档保留客户端输入及最终响应。
 - 普通有效 JSON 保留原始正文。SSE 输出保存为 JSON 包装：`{"format":"sse","data":"原始 SSE 文本","complete":true,"status":200,"request_uuid":"..."}`；中断时 `complete=false`，不会改变向客户端传输的 SSE 字节。无 JSON 正文的请求/响应使用同类包装。认证头、Cookie 和其它 HTTP 头不会写入对象。
+- 图片编辑的 multipart 输入保存为 `{"format":"multipart","encoding":"base64","content_type":"multipart/form-data; boundary=...","data":"原始请求体的 base64","request_uuid":"..."}`，文件、mask、重复字段及边界均可无损还原。图片接口的 S3 捕获仍受单方向 32 MiB 限制，较大的图片请求/响应可正常转发，但归档状态会显示超限。
 - 单方向最多捕获 32 MiB；超限不上传截断内容，记录状态“超过 32 MiB，未存储”。S3 失败不重放模型调用，也不修改客户端响应；归档在响应刷出后进行有超时的尽力写入，进程中断或失败不会自动重试。调用记录展示输入/输出对象路径及各自状态（待写入、已存储、失败等）。
 
 迁移 `010_storage_and_spend.sql` 增加开关、请求 UUID、对象路径/状态与消费查询索引；PostgreSQL 不保存对话正文。旧记录不回填 UUID 或 S3 文件。删除私钥保留历史调用与 S3 对象，存储桶保留期限由桶生命周期策略管理；数据库备份不包含 S3 对象。

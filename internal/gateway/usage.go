@@ -11,6 +11,35 @@ type Usage struct {
 	Model, ServiceTier                   string
 	Write30m, Write12h                   int64
 	WriteKnown                           bool
+	Image                                bool
+	TextInput, ImageInput                int64
+	TextOutput, ImageOutput              int64
+	ImageInputKnown, ImageOutputKnown    bool
+}
+
+func usageForPath(v map[string]any, path string) Usage {
+	u := usageFrom(v)
+	if !isImagePath(path) {
+		return u
+	}
+	u.Image = true
+	us, _ := v["usage"].(map[string]any)
+	if d, ok := us["input_tokens_details"].(map[string]any); ok {
+		var textKnown, imageKnown bool
+		u.TextInput, textKnown = tokenNumber(d["text_tokens"])
+		u.ImageInput, imageKnown = tokenNumber(d["image_tokens"])
+		u.ImageInputKnown = textKnown && imageKnown && u.InputKnown && u.TextInput+u.ImageInput == u.Input
+	}
+	if d, ok := us["output_tokens_details"].(map[string]any); ok {
+		var textKnown, imageKnown bool
+		u.TextOutput, textKnown = tokenNumber(d["text_tokens"])
+		u.ImageOutput, imageKnown = tokenNumber(d["image_tokens"])
+		u.ImageOutputKnown = textKnown && imageKnown && u.OutputKnown && u.TextOutput+u.ImageOutput == u.Output
+	} else {
+		// The Images API defines output_tokens as generated image tokens.
+		u.ImageOutput, u.ImageOutputKnown = u.Output, u.OutputKnown
+	}
+	return u
 }
 
 func tokenNumber(v any) (int64, bool) {

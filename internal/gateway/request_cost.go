@@ -157,6 +157,9 @@ func estimateRequest(ctx context.Context, tx pgx.Tx, platform, model string, usa
 		tier = usage.ServiceTier
 	}
 	c := estimateTokens(p, current, usage, tier)
+	if usage.Image {
+		c = estimateImageTokens(p, current, usage, tier)
+	}
 	c.Snapshot["platform"], c.Snapshot["synced_at"], c.Snapshot["source_url"] = platform, syncedAt, sourceURL
 	return c, nil
 }
@@ -168,6 +171,12 @@ func (a *App) record(ctx context.Context, k GatewayKey, u Upstream, method, path
 }
 
 func (a *App) persistRecord(ctx context.Context, k GatewayKey, u Upstream, method, path string, status int, code string, start time.Time, usage Usage, responseID string, attempt int, kind string) error {
+	if isImagePath(path) {
+		usage.Image = true
+		if imageCacheNotApplicable(u.Model) && !usage.CachedKnown {
+			usage.CachedKnown = true
+		}
+	}
 	tx, err := a.DB.Begin(ctx)
 	if err != nil {
 		return err

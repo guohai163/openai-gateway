@@ -1597,6 +1597,15 @@ tbody tr:hover .actions-column {
   justify-content: space-between;
   gap: 15px;
 }
+.image-cost-rates {
+  display: grid;
+  gap: 8px;
+}
+.image-cost-rates > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+}
 .cost-breakdown b {
   font-weight: 500;
 }

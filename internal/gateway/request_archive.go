@@ -3,8 +3,10 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -131,7 +133,12 @@ func (a *App) archiveRequest(ctx context.Context, k GatewayKey, r *http.Request,
 			return "too_large"
 		}
 		data := capture.data.Bytes()
-		if !json.Valid(data) {
+		contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if !isOutput && contentType == "multipart/form-data" {
+			// Binary form data cannot be losslessly represented as a JSON string.
+			// Preserve the complete original form, including boundary and mask.
+			data, _ = json.Marshal(map[string]any{"format": "multipart", "encoding": "base64", "content_type": r.Header.Get("Content-Type"), "data": base64.StdEncoding.EncodeToString(data), "request_uuid": k.RequestUUID})
+		} else if !json.Valid(data) {
 			format := "text"
 			if isOutput && strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream") {
 				format = "sse"

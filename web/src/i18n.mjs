@@ -87,7 +87,7 @@ export const messages = {
     longContextApplied: "Long-context rates applied to input and output.",
     responseModel: "Returned model",
     costEstimateHint:
-      "Public text token rates at request time; excludes tools and other charges. Not an official invoice.",
+      "Public token rates at request time; excludes tools and other charges. Not an official invoice.",
     price_missing_or_stale: "No current matching price is available.",
     long_context_unknown: "Long-context pricing rules are unknown.",
     unsupported_service_tier: "This service tier has no supported price.",
@@ -96,6 +96,8 @@ export const messages = {
       "Cache write pricing or lifetime usage is unavailable.",
     cache_usage_missing: "Upstream did not report cache details.",
     usage_missing: "Upstream did not report complete usage.",
+    image_usage_missing:
+      "Image token totals or text/image breakdown are missing or inconsistent.",
     pricing: "Model pricing",
     platform: "Platform",
     pricingScope: "Standard text, embedding & image rates · USD / 1M tokens",
@@ -420,7 +422,7 @@ export const messages = {
     longContextApplied: "已按长上下文档位计算输入和输出费用。",
     responseModel: "实际返回模型",
     costEstimateHint:
-      "按调用时公开文本单价估算，不含工具等其他费用，以官方账单为准。",
+      "按调用时公开 Token 单价估算，不含工具等其他费用，以官方账单为准。",
     price_missing_or_stale: "缺少当前有效的匹配单价。",
     long_context_unknown: "长上下文计价规则未知。",
     unsupported_service_tier: "此服务档位的价格暂未支持。",
@@ -429,6 +431,7 @@ export const messages = {
       "上游返回了缓存写入用量，但缺少对应单价或有效期明细。",
     cache_usage_missing: "上游未返回缓存用量明细。",
     usage_missing: "上游未返回完整用量。",
+    image_usage_missing: "图片 Token 总量或文本/图像分项缺失或不一致。",
     pricing: "模型定价",
     platform: "平台",
     pricingScope: "Standard 文本、向量与图像定价 · 美元 / 百万 Token",
