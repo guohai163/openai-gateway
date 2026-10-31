@@ -44,27 +44,31 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 413, "request_too_large")
 			return
 		}
-		var v map[string]json.RawMessage
-		if json.Unmarshal(body, &v) != nil || v == nil {
+		// 优化：使用按需结构体解析，避免将大请求体解析为 map[string]json.RawMessage 导致大量内存分配
+		var v struct {
+			Model              string          `json:"model"`
+			ServiceTier        string          `json:"service_tier"`
+			Conversation       json.RawMessage `json:"conversation"`
+			PreviousResponseID string          `json:"previous_response_id"`
+		}
+		if json.Unmarshal(body, &v) != nil {
 			writeError(w, 400, "invalid_json")
 			return
 		}
-		_ = json.Unmarshal(v["model"], &model)
-		_ = json.Unmarshal(v["service_tier"], &serviceTier)
+		model = v.Model
+		serviceTier = v.ServiceTier
 		if model == "" {
 			writeError(w, 400, "model_required")
 			return
 		}
 		isResponse = path == "/v1/responses"
 		if isResponse {
-			if raw := v["conversation"]; len(raw) > 0 && string(raw) != "null" {
+			if len(v.Conversation) > 0 && string(v.Conversation) != "null" {
 				writeError(w, 400, "conversations_not_supported")
 				return
 			}
-			var previous string
-			_ = json.Unmarshal(v["previous_response_id"], &previous)
-			if previous != "" {
-				if a.DB.QueryRow(r.Context(), "SELECT upstream_key_id FROM response_bindings WHERE response_id=$1 AND gateway_key_id=$2", previous, k.ID).Scan(&pin) != nil {
+			if v.PreviousResponseID != "" {
+				if a.DB.QueryRow(r.Context(), "SELECT upstream_key_id FROM response_bindings WHERE response_id=$1 AND gateway_key_id=$2", v.PreviousResponseID, k.ID).Scan(&pin) != nil {
 					writeError(w, 404, "response_not_found")
 					return
 				}

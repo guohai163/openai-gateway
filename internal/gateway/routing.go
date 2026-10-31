@@ -1,11 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -47,7 +47,8 @@ func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, er
 	return out, nil
 }
 func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, body []byte) (*http.Request, error) {
-	req, e := http.NewRequestWithContext(ctx, method, a.Config.UpstreamURL+path, strings.NewReader(string(body)))
+	// 优化：避免将 []byte 强制转换为 string 导致的内存拷贝（减少大请求的 GC 压力）
+	req, e := http.NewRequestWithContext(ctx, method, a.Config.UpstreamURL+path, bytes.NewReader(body))
 	if e != nil {
 		return nil, e
 	}
