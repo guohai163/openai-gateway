@@ -2043,8 +2043,38 @@ tbody tr:hover .actions-column {
   text-align: left;
 }
 .log-filter-panel {
-  padding: 0 20px 18px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
+}
+.log-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0;
+}
+.log-filter-toggle {
+  background: transparent;
+  color: var(--text);
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+.log-filter-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.log-filter-count {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--selected);
+  color: var(--muted);
+  font-size: 12px;
+}
+.log-filter-panel > [id] {
+  padding-bottom: 18px;
 }
 .log-status-tabs {
   display: flex;

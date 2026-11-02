@@ -930,6 +930,7 @@ function App() {
             <section className="panel data-panel">
               {page === "logs" && (
                 <LogFilters
+                  totalText={`${number(logTotal)} ${t("total")}`}
                   value={logFilters}
                   options={logOptions}
                   isAdmin={isAdmin}
@@ -944,8 +945,8 @@ function App() {
                   }}
                 />
               )}
-              <div className="table-toolbar">
-                {page !== "logs" && (
+              {page !== "logs" && (
+                <div className="table-toolbar">
                   <label className="search">
                     <Search size={16} />
                     <input
@@ -955,12 +956,11 @@ function App() {
                       onChange={(e) => setQuery(e.target.value)}
                     />
                   </label>
-                )}
-                <span className="record-count">
-                  {number(page === "logs" ? logTotal : data.length)}{" "}
-                  {t("total")}
-                </span>
-              </div>
+                  <span className="record-count">
+                    {number(data.length)} {t("total")}
+                  </span>
+                </div>
+              )}
               <div className="table-scroll">
                 <table
                   className={page === "logs" ? "request-log-table" : undefined}

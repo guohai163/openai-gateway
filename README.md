@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.9.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.9.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.9.0`。
+最新版本：[v1.9.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.9.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.9.1`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -268,7 +268,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 ## 调用记录：费用与缓存
 
-- 筛选面板支持模型、所属用户、上游密钥、私有密钥、状态码、调用类型、时间范围和关键词。点击“应用筛选”查询全部有权查看的历史记录；筛选在分页前执行，总数为匹配记录数。普通用户不展示账号、上游和恢复探测条件。
+- 筛选/搜索默认折叠，点击入口展开；应用后自动收起，收起时显示已启用条件数量并可直接清空。筛选面板支持模型、所属用户、上游密钥、私有密钥、状态码、调用类型、时间范围和关键词。点击“应用筛选”查询全部有权查看的历史记录；筛选在分页前执行，总数为匹配记录数。普通用户不展示账号、上游和恢复探测条件。
 - 开始时间包含在内，结束时间不包含在内，输入时间使用浏览器本地时区。`GET /admin/api/logs` 支持 `model`、`owner_id`、`upstream_key_id`、`gateway_key_id`、`status`（`success` / `failed` / HTTP 状态码）、`kind`、`start` / `end`（RFC3339）、`q`、`limit` / `offset`；返回 `data`、`total`、`options` 和分页参数。普通用户的查询和选项始终限定在自己的推理调用。
 
 - 请求 IP 后提供“查询”按钮，点击才由服务端请求 `https://ipconfig.io/json?ip=日志IP`，在当前 IP 下展示 `country`、`city`、`asn`、`asn_org`。管理员可查询全部记录，普通用户仅可查询自己的记录；公网 IP 会发送给该第三方服务，结果作为归属参考，不保存到数据库、不自动批量查询。内网、本地及共享地址直接标记，不发送到外部。
