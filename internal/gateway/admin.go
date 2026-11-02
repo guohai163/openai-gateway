@@ -47,6 +47,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		a.storageTest(w, r)
 		return
 	}
+	if resource == "logs" && len(parts) == 4 && parts[2] == "archive" && r.Method == "GET" {
+		a.readLogArchive(w, r, parts[1], parts[3])
+		return
+	}
 	if resource == "pricing" {
 		a.pricingAdmin(w, r, parts)
 		return

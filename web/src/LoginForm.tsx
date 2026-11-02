@@ -25,6 +25,8 @@ export function LoginForm({ api, t, onLogin }: Props) {
   }, [challenge]);
   return (
     <form
+      // Remount between steps so autofill tools see a new input instead of the password node.
+      key={challenge ? "otp" : "login"}
       className="login-card"
       onSubmit={async (e) => {
         e.preventDefault();
@@ -85,7 +87,9 @@ export function LoginForm({ api, t, onLogin }: Props) {
           <label>
             {t("otpCode")}
             <input
+              id="otp-code"
               name="otp"
+              type="text"
               autoFocus
               autoComplete="one-time-code"
               inputMode="numeric"

@@ -2032,9 +2032,88 @@ tbody tr:hover .actions-column {
   font-size: 11px;
 }
 .archive-status code {
+  display: block;
   font-size: 10px;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+.archive-open {
+  font-size: 11px;
+  justify-content: flex-start;
+  text-align: left;
+}
+.archive-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-height: 90dvh;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: auto;
+}
+.archive-dialog::backdrop {
+  background: var(--overlay);
+}
+.archive-view-meta {
+  display: grid;
+  gap: 8px;
+  padding: 18px 22px 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.archive-view-meta code {
+  font-size: 12px;
+}
+.archive-view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 22px;
+  font-size: 12px;
+}
+.archive-copy-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.archive-view-state {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+  padding: 22px;
+}
+.archive-preview-hint {
+  margin: 0 22px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.archive-json {
+  margin: 0;
+  padding: 20px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--subtle);
+  color: var(--text);
+  font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.archive-json .json-key {
+  color: light-dark(#235c9e, #8bbdff);
+}
+.archive-json .json-string {
+  color: var(--positive);
+}
+.archive-json .json-number {
+  color: light-dark(#8051a0, #d2a6f5);
+}
+.archive-json .json-boolean,
+.archive-json .json-null {
+  color: var(--warning);
 }
 @media (max-width: 650px) {
   .monthly-spending-heading {

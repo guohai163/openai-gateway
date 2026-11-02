@@ -38,6 +38,7 @@ import {
 import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
 import { ClientIPDetails } from "./ClientIPDetails";
+import { ArchiveDetails } from "./ArchiveDetails";
 import { SpendingDetails, usd } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
@@ -506,18 +507,7 @@ function App() {
     if (c === "request_uuid") return <code title={v}>{v || "—"}</code>;
     if (c === "archive_status")
       return r.input_status || r.output_status ? (
-        <div className="archive-status">
-          <small>
-            {t("archiveInput")}:{" "}
-            {t("archive_" + (r.input_status || "disabled"))}
-          </small>
-          <small>
-            {t("archiveOutput")}:{" "}
-            {t("archive_" + (r.output_status || "disabled"))}
-          </small>
-          {r.input_path && <code title={r.input_path}>{r.input_path}</code>}
-          {r.output_path && <code title={r.output_path}>{r.output_path}</code>}
-        </div>
+        <ArchiveDetails key={r.id} row={r} api={api} t={t} />
       ) : (
         "—"
       );

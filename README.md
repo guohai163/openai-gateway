@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.8.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.8.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.8.1`。
+最新版本：[v1.8.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.8.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.8.2`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -440,5 +440,6 @@ REPORT_TIMEZONE=Asia/Shanghai
 - 普通有效 JSON 保留原始正文。SSE 输出保存为 JSON 包装：`{"format":"sse","data":"原始 SSE 文本","complete":true,"status":200,"request_uuid":"..."}`；中断时 `complete=false`，不会改变向客户端传输的 SSE 字节。无 JSON 正文的请求/响应使用同类包装。认证头、Cookie 和其它 HTTP 头不会写入对象。
 - 图片编辑的 multipart 输入保存为 `{"format":"multipart","encoding":"base64","content_type":"multipart/form-data; boundary=...","data":"原始请求体的 base64","request_uuid":"..."}`，文件、mask、重复字段及边界均可无损还原。图片接口的 S3 捕获仍受单方向 32 MiB 限制，较大的图片请求/响应可正常转发，但归档状态会显示超限。
 - 单方向最多捕获 32 MiB；超限不上传截断内容，记录状态“超过 32 MiB，未存储”。S3 失败不重放模型调用，也不修改客户端响应；归档在响应刷出后进行有超时的尽力写入，进程中断或失败不会自动重试。调用记录展示输入/输出对象路径及各自状态（待写入、已存储、失败等）。
+- 管理员可点击请求日志中“输入：已存储”或“输出：已存储”，在弹层中查看格式化、语法高亮的 JSON 并复制全文；SSE 等归档显示保存时的 JSON 包装。较大内容仅预览前 256K 个字符。读取接口为 `GET /admin/api/logs/{日志ID}/archive/input` 或 `output`，按日志中的已存储路径读取，不接受客户端指定对象路径；普通用户不可访问，响应禁止缓存。
 
 迁移 `010_storage_and_spend.sql` 增加开关、请求 UUID、对象路径/状态与消费查询索引；PostgreSQL 不保存对话正文。旧记录不回填 UUID 或 S3 文件。删除私钥保留历史调用与 S3 对象，存储桶保留期限由桶生命周期策略管理；数据库备份不包含 S3 对象。
