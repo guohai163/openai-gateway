@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 
 export type LogFilterValues = {
@@ -36,6 +36,7 @@ export function LogFilters({
   isAdmin,
   loading,
   totalText,
+  columnControl,
   onChange,
   t,
 }: {
@@ -44,6 +45,7 @@ export function LogFilters({
   isAdmin: boolean;
   loading: boolean;
   totalText: string;
+  columnControl: ReactNode;
   onChange: (filters: LogFilterValues) => void;
   t: (key: string) => string;
 }) {
@@ -100,6 +102,7 @@ export function LogFilters({
           <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
         </button>
         <div className="log-filter-summary">
+          {columnControl}
           {!expanded && active.length > 0 && (
             <button
               type="button"

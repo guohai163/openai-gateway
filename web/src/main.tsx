@@ -39,6 +39,7 @@ import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
 import { ClientIPDetails } from "./ClientIPDetails";
 import { ArchiveDetails } from "./ArchiveDetails";
+import { LogColumnPicker, useLogColumns } from "./LogColumnPicker";
 import {
   LogFilters,
   emptyLogFilters,
@@ -119,6 +120,7 @@ function App() {
     [settings, setSettings] = useState<Row>({});
   const [identity, setIdentity] = useState<Row>({});
   const isAdmin = identity.role === "admin";
+  const logColumns = useLogColumns(isAdmin, identity.id || "anonymous", page === "logs");
   const [models, setModels] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
@@ -502,23 +504,7 @@ function App() {
       "status",
       "expires_at",
     ],
-    logs: [
-      "created_at",
-      "model",
-      ...(isAdmin ? ["owner_email"] : []),
-      "status",
-      "token_usage",
-      "request_cost",
-      "request_uuid",
-      ...(isAdmin ? ["archive_status"] : []),
-      "ip",
-      "duration_ms",
-      "gateway_name",
-      ...(isAdmin ? ["upstream_name"] : []),
-      "endpoint",
-      "error_code",
-      "kind",
-    ],
+    logs: logColumns.columns,
     audit: ["created_at", "action", "resource", "resource_id"],
   };
   function cell(c: string, r: Row) {
@@ -930,6 +916,7 @@ function App() {
             <section className="panel data-panel">
               {page === "logs" && (
                 <LogFilters
+                  columnControl={<LogColumnPicker columns={logColumns.columns} automatic={logColumns.automatic} admin={isAdmin} onChange={logColumns.onChange} t={t} />}
                   totalText={`${number(logTotal)} ${t("total")}`}
                   value={logFilters}
                   options={logOptions}
@@ -961,14 +948,15 @@ function App() {
                   </span>
                 </div>
               )}
-              <div className="table-scroll">
+              <div className="table-scroll" ref={logColumns.containerRef}>
                 <table
                   className={page === "logs" ? "request-log-table" : undefined}
+                  style={page === "logs" && !logColumns.automatic ? { minWidth: `${logColumns.columns.length * 150}px` } : undefined}
                 >
                   <thead>
                     <tr>
                       {columns[page]?.map((c) => (
-                        <th key={c}>{t(c)}</th>
+                        <th key={c} data-column={c}>{t(c)}</th>
                       ))}
                       {canAdd && (
                         <th className="actions-column">{t("actions")}</th>
@@ -989,7 +977,7 @@ function App() {
                         <React.Fragment key={r.id || i}>
                           <tr>
                             {columns[page]?.map((c) => (
-                              <td key={c}>{cell(c, r)}</td>
+                              <td key={c} data-column={c}>{cell(c, r)}</td>
                             ))}
                             {canAdd && (
                               <td className="actions-column">
