@@ -2042,6 +2042,68 @@ tbody tr:hover .actions-column {
   justify-content: flex-start;
   text-align: left;
 }
+.log-filter-panel {
+  padding: 0 20px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.log-status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.log-status-tabs button {
+  background: none;
+  color: var(--muted);
+  padding: 14px 0 12px;
+  border-bottom: 2px solid transparent;
+}
+.log-status-tabs button[aria-pressed="true"] {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+.log-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.log-filter-search {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.log-filter-search .search {
+  flex: 1 1 220px;
+  max-width: none;
+}
+.log-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.log-filter-chips button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 12px;
+}
+.log-time-hint {
+  display: block;
+  color: var(--muted);
+  margin-top: 10px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .log-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 550px) {
+  .log-filter-grid { grid-template-columns: minmax(0, 1fr); }
+  .log-filter-panel { padding-left: 14px; padding-right: 14px; }
+}
 .archive-dialog {
   width: min(960px, calc(100vw - 32px));
   max-height: 90dvh;

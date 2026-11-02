@@ -39,6 +39,12 @@ import { ModelPricing } from "./ModelPricing";
 import { RequestTokens, RequestCost } from "./RequestUsage";
 import { ClientIPDetails } from "./ClientIPDetails";
 import { ArchiveDetails } from "./ArchiveDetails";
+import {
+  LogFilters,
+  emptyLogFilters,
+  type LogFilterValues,
+  type LogFilterOptions,
+} from "./LogFilters";
 import { SpendingDetails, usd } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
@@ -81,7 +87,7 @@ async function api(path: string, options: RequestInit = {}) {
 }
 function App() {
   const [preference, setPreference] = useState(
-      localStorage.getItem("openai-language") || "auto",
+      localStorage.getItem("openai-language") || "auto"
     ),
     [browser, setBrowser] = useState(navigator.languages as readonly string[]);
   const language = resolveLanguage(preference, [...browser]) as "en" | "zh",
@@ -130,6 +136,12 @@ function App() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null),
     [keyCopied, setKeyCopied] = useState<string | null>(null);
   const sessionGeneration = useRef(0);
+  const loadGeneration = useRef(0);
+  const [logFilters, setLogFilters] = useState<LogFilterValues>({
+    ...emptyLogFilters,
+  });
+  const [logOptions, setLogOptions] = useState<LogFilterOptions>({});
+  const [logTotal, setLogTotal] = useState(0);
   const authChannel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
@@ -147,6 +159,9 @@ function App() {
     setDashboard({});
     setSettings({});
     setModels([]);
+    setLogFilters({ ...emptyLogFilters });
+    setLogOptions({});
+    setLogTotal(0);
     setModal(null);
     setCatalog(null);
     setUsage(null);
@@ -201,10 +216,15 @@ function App() {
   async function load() {
     if (page === "pricing" || page === "users" || page === "account") return;
     const generation = sessionGeneration.current;
+    const requestGeneration = ++loadGeneration.current;
     setLoading(true);
     setError("");
     try {
       const q = new URLSearchParams({ limit: "100", offset: String(offset) });
+      if (page === "logs")
+        Object.entries(logFilters).forEach(([key, value]) => {
+          if (value) q.set(key, value);
+        });
       const path =
         page === "overview"
           ? "dashboard"
@@ -217,21 +237,42 @@ function App() {
         page === "settings" ? settingsPromise : api(path),
         settingsPromise,
       ]);
-      if (generation !== sessionGeneration.current) return;
+      if (
+        generation !== sessionGeneration.current ||
+        requestGeneration !== loadGeneration.current
+      )
+        return;
       setSettings(configuration);
       setModels(catalog);
       if (page === "overview") setDashboard(result);
       else if (page === "settings") setSettings(result);
-      else setData(result.data);
+      else {
+        setData(result.data);
+        if (page === "logs") {
+          setLogTotal(result.total);
+          setLogOptions(result.options || {});
+        }
+      }
     } catch (e) {
-      if (generation === sessionGeneration.current) fail(e);
+      if (
+        generation === sessionGeneration.current &&
+        requestGeneration === loadGeneration.current
+      )
+        fail(e);
     } finally {
-      if (generation === sessionGeneration.current) setLoading(false);
+      if (
+        generation === sessionGeneration.current &&
+        requestGeneration === loadGeneration.current
+      )
+        setLoading(false);
     }
   }
   useEffect(() => {
     if (session) void load();
-  }, [session, page, offset]);
+    return () => {
+      loadGeneration.current++;
+    };
+  }, [session, page, offset, logFilters]);
   async function action(id: string, name: string) {
     setBusy(true);
     setError("");
@@ -322,6 +363,7 @@ function App() {
     }
   }
   function navigate(p: Page) {
+    loadGeneration.current++;
     setPage(p);
     setOffset(0);
     setQuery("");
@@ -330,7 +372,7 @@ function App() {
   }
   const number = (v: any) =>
     new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(
-      Number(v || 0),
+      Number(v || 0)
     );
   const date = (v: any) =>
     v
@@ -463,6 +505,7 @@ function App() {
     logs: [
       "created_at",
       "model",
+      ...(isAdmin ? ["owner_email"] : []),
       "status",
       "token_usage",
       "request_cost",
@@ -528,7 +571,7 @@ function App() {
       );
     if (
       ["created_at", "expires_at", "model_synced_at", "next_probe_at"].includes(
-        c,
+        c
       )
     )
       return c === "expires_at" && !v ? t("never") : date(v);
@@ -638,7 +681,7 @@ function App() {
           {nav
             .filter(
               ([p]) =>
-                isAdmin || ["gateway_keys", "logs", "account"].includes(p),
+                isAdmin || ["gateway_keys", "logs", "account"].includes(p)
             )
             .map(([p, icon]) => (
               <React.Fragment key={p}>
@@ -705,12 +748,12 @@ function App() {
                   page === "overview"
                     ? "introduction"
                     : page === "settings"
-                      ? "settingsHint"
-                      : page === "pricing"
-                        ? "pricingDescription"
-                        : page === "gateway_keys" && !isAdmin
-                          ? "userKeysHint"
-                          : "subtitle",
+                    ? "settingsHint"
+                    : page === "pricing"
+                    ? "pricingDescription"
+                    : page === "gateway_keys" && !isAdmin
+                    ? "userKeysHint"
+                    : "subtitle"
                 )}
               </p>
             </div>
@@ -885,18 +928,37 @@ function App() {
             </>
           ) : (
             <section className="panel data-panel">
+              {page === "logs" && (
+                <LogFilters
+                  value={logFilters}
+                  options={logOptions}
+                  isAdmin={isAdmin}
+                  loading={loading}
+                  t={t}
+                  onChange={(filters) => {
+                    loadGeneration.current++;
+                    setData([]);
+                    setLogTotal(0);
+                    setOffset(0);
+                    setLogFilters(filters);
+                  }}
+                />
+              )}
               <div className="table-toolbar">
-                <label className="search">
-                  <Search size={16} />
-                  <input
-                    aria-label={t("name")}
-                    placeholder={t("name") + " / ID"}
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </label>
+                {page !== "logs" && (
+                  <label className="search">
+                    <Search size={16} />
+                    <input
+                      aria-label={t("name")}
+                      placeholder={t("name") + " / ID"}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </label>
+                )}
                 <span className="record-count">
-                  {number(data.length)} {t("total")}
+                  {number(page === "logs" ? logTotal : data.length)}{" "}
+                  {t("total")}
                 </span>
               </div>
               <div className="table-scroll">
@@ -917,10 +979,11 @@ function App() {
                     {data
                       .filter(
                         (r) =>
+                          page === "logs" ||
                           !query ||
                           JSON.stringify(r)
                             .toLowerCase()
-                            .includes(query.toLowerCase()),
+                            .includes(query.toLowerCase())
                       )
                       .map((r, i) => (
                         <React.Fragment key={r.id || i}>
@@ -1050,7 +1113,7 @@ function App() {
                   <div className="empty-state">
                     <Database size={28} />
                     <h3>{t(loading ? "loading" : "empty")}</h3>
-                    <p>{t("emptyHint")}</p>
+                    <p>{t(page === "logs" ? "logEmptyHint" : "emptyHint")}</p>
                   </div>
                 )}
               </div>
@@ -1067,7 +1130,11 @@ function App() {
                     {t("previous")}
                   </button>
                   <button
-                    disabled={data.length < 100 || loading}
+                    disabled={
+                      (page === "logs"
+                        ? offset + 100 >= logTotal
+                        : data.length < 100) || loading
+                    }
                     onClick={() => setOffset(offset + 100)}
                   >
                     {t("next")}
@@ -1114,7 +1181,7 @@ function App() {
                   "name",
                   "text",
                   page === "gateway_keys" ? "keyNameHint" : "",
-                  !modal.id || page === "gateway_keys",
+                  !modal.id || page === "gateway_keys"
                 )}
                 {page === "upstream_keys" && (
                   <>

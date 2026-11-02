@@ -35,9 +35,6 @@ func (a *App) userList(w http.ResponseWriter, r *http.Request, resource string, 
 	case "models":
 		query = `SELECT DISTINCT m.model FROM models m WHERE EXISTS(SELECT 1 FROM (` + pricedModels + `) p WHERE p.platform='openai' AND p.model=m.model) ORDER BY model LIMIT $1 OFFSET $2`
 		args = []any{limit, offset}
-	// Explicit columns: no upstream ID/name, archive paths/status, or switches.
-	case "logs":
-		query = `SELECT l.id,l.request_uuid,l.gateway_key_id,g.name AS gateway_name,l.model,l.method,l.endpoint,l.ip,l.status,l.error_code,l.duration_ms,l.input_tokens,l.output_tokens,l.cached_tokens,l.response_id,l.attempt,l.created_at,l.platform,l.usage_known,l.cached_tokens_known,l.cache_write_tokens,l.usage_accounting,l.pricing_status,l.pricing_snapshot,l.input_cost,l.output_cost,l.cached_input_cost,l.total_cost,l.cache_write_cost FROM request_logs l JOIN gateway_keys g ON g.id=l.gateway_key_id WHERE g.user_id=$1 AND l.kind='inference' ORDER BY l.created_at DESC LIMIT $2 OFFSET $3`
 	case "gateway_keys":
 		query = a.keyMonthlyScope("gateway_keys", true)
 		start, end := a.monthRange()

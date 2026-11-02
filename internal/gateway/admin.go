@@ -204,13 +204,12 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	queries := map[string]string{
 		"upstream_keys": `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k ORDER BY k.created_at DESC`,
 		"gateway_keys":  `SELECT id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal FROM gateway_keys WHERE deleted_at IS NULL ORDER BY created_at DESC`,
-		"logs":          `SELECT l.*,g.name AS gateway_name,k.name AS upstream_name,a.input_path,a.output_path,a.input_status,a.output_status FROM request_logs l LEFT JOIN request_archives a ON a.request_uuid=l.request_uuid LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id ORDER BY l.created_at DESC`,
 		"audit":         `SELECT * FROM audit_logs ORDER BY created_at DESC`,
 		"models":        `SELECT DISTINCT model FROM models ORDER BY model`,
 		"cooldowns":     `SELECT * FROM cooldowns WHERE until_at>now() ORDER BY until_at DESC`,
 	}
 	q, ok := queries[resource]
-	if !ok {
+	if !ok && resource != "logs" {
 		writeError(w, 404, "not_found")
 		return
 	}
@@ -221,6 +220,10 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if offset < 0 {
 		offset = 0
+	}
+	if resource == "logs" {
+		a.listRequestLogs(w, r, limit, offset)
+		return
 	}
 	if a.userList(w, r, resource, limit, offset) {
 		return
