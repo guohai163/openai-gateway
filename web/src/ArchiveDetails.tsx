@@ -1,11 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, FileJson, X } from "lucide-react";
-import {
-  archivePreviewLimit,
-  formatArchiveJSON,
-  highlightArchiveJSON,
-} from "./archive-json.mjs";
+import { archivePreviewLimit, formatArchiveJSON } from "./archive-json.mjs";
+import { ArchiveJSONTree } from "./ArchiveJSONTree";
 
 type Props = {
   row: Record<string, any>;
@@ -69,13 +66,6 @@ function ArchiveJSONDialog({
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [copyStatus, setCopyStatus] = useState("");
-  const tokens = useMemo(
-    () =>
-      content === null
-        ? []
-        : highlightArchiveJSON(content.slice(0, archivePreviewLimit)),
-    [content]
-  );
 
   useEffect(() => {
     const el = dialog.current!;
@@ -183,15 +173,10 @@ function ArchiveJSONDialog({
               {t("archivePreviewTruncated")}
             </p>
           )}
-          <pre className="archive-json" aria-label={t("viewArchiveJSON")}>
-            <code>
-              {tokens.map((token, i) => (
-                <span key={i} className={`json-${token.kind}`}>
-                  {token.text}
-                </span>
-              ))}
-            </code>
-          </pre>
+          <ArchiveJSONTree
+            content={content.slice(0, archivePreviewLimit)}
+            t={t}
+          />
         </>
       )}
     </dialog>

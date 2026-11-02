@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   formatArchiveJSON,
   highlightArchiveJSON,
+  buildArchiveJSONTree,
+  collapsedArchiveLines,
 } from "../src/archive-json.mjs";
 
 test("archive formatting preserves exact numbers, string escapes and nested data", () => {
@@ -20,6 +22,58 @@ test("archive formatting preserves exact numbers, string escapes and nested data
       .join(""),
     formatted
   );
+});
+
+function restoreTree(nodes) {
+  const lines = [];
+  const visit = (node) => {
+    lines.push(node.text);
+    node.children.forEach(visit);
+    if (node.close !== null) lines.push(node.close);
+  };
+  nodes.forEach(visit);
+  return lines.join("\n");
+}
+
+test("folding preserves nested arrays, duplicate keys, escaped braces and exact numeric text", () => {
+  const formatted = formatArchiveJSON(
+    '{"messages":[{"content":"not a bracket: } { [ ] \\""}],"id":9007199254740993123,"id":-0,"empty":{}}'
+  );
+  const nodes = buildArchiveJSONTree(formatted);
+  assert.equal(restoreTree(nodes), formatted);
+  const root = nodes[0];
+  assert.equal(root.children.length, 4);
+  const array = root.children[0];
+  assert.equal(array.children.length, 1);
+  assert.equal(array.children[0].children[0].foldable, false);
+  assert.equal(root.children[3].foldable, false);
+  const initial = collapsedArchiveLines(nodes);
+  assert.ok(!initial.includes(root.id));
+  assert.ok(!initial.includes(array.id));
+  assert.ok(initial.includes(array.children[0].id));
+  assert.ok(collapsedArchiveLines(nodes, true).includes(root.id));
+});
+
+test("long content starts folded and retains its complete string for expansion", () => {
+  const text = 'line with \\n and <script> and quotes " '.repeat(50);
+  const formatted = formatArchiveJSON(JSON.stringify({ content: text }));
+  const nodes = buildArchiveJSONTree(formatted);
+  const content = nodes[0].children[0];
+  assert.equal(content.long, true);
+  assert.ok(collapsedArchiveLines(nodes).includes(content.id));
+  assert.equal(restoreTree(nodes), formatted);
+});
+
+test("truncated previews do not fabricate closing brackets or parse partial strings", () => {
+  for (const partial of [
+    '{\n  "messages": [\n    {\n      "text": "unfinished {',
+    '{\n  "list": [\n    123',
+    '"very long string' + "x".repeat(400),
+  ]) {
+    const nodes = buildArchiveJSONTree(partial);
+    assert.equal(restoreTree(nodes), partial);
+    assert.equal(nodes[0].close, null);
+  }
 });
 
 test("JSON highlighting treats HTML and script content as string text", () => {

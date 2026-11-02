@@ -2177,6 +2177,56 @@ tbody tr:hover .actions-column {
 .archive-json .json-null {
   color: var(--warning);
 }
+.archive-tree-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 22px 16px;
+}
+.archive-json-tree {
+  white-space: normal;
+}
+.archive-tree-line {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.archive-tree-line > code {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.archive-tree-toggle,
+.archive-tree-spacer {
+  display: inline-flex;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+}
+.archive-tree-toggle {
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0;
+  font: inherit;
+}
+.archive-tree-preview {
+  display: inline;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--hover);
+  font: inherit;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.archive-tree-toggle:hover,
+.archive-tree-preview:hover {
+  color: var(--text);
+  background: var(--selected);
+}
 @media (max-width: 650px) {
   .monthly-spending-heading {
     align-items: flex-start;

@@ -33,6 +33,58 @@ export function formatArchiveJSON(content) {
 
 export const archivePreviewLimit = 256 * 1024;
 
+/**
+ * @typedef {{id:number, text:string, depth:number, children:ArchiveJSONLine[], close:string|null, foldable:boolean, long:boolean}} ArchiveJSONLine
+ */
+
+/** Build a foldable view of formatted JSON without parsing number values.
+ * Works with a truncated preview too: unfinished branches retain their text.
+ * @param {string} content
+ * @returns {ArchiveJSONLine[]}
+ */
+export function buildArchiveJSONTree(content) {
+  /** @type {ArchiveJSONLine[]} */
+  const roots = [];
+  /** @type {ArchiveJSONLine[]} */
+  const stack = [];
+  content.split("\n").forEach((text, id) => {
+    const trimmed = text.trim();
+    if (/^[}\]],?$/.test(trimmed) && stack.length) {
+      stack.pop().close = text;
+      return;
+    }
+    const branch = /^(?:"(?:\\.|[^"\\])*"\s*:\s*)?[{\[]$/.test(trimmed);
+    const long = !branch && text.length > 300;
+    /** @type {ArchiveJSONLine} */
+    const node = {
+      id,
+      text,
+      depth: stack.length,
+      children: [],
+      close: null,
+      foldable: branch || long,
+      long,
+    };
+    (stack.length ? stack[stack.length - 1].children : roots).push(node);
+    if (branch) stack.push(node);
+  });
+  return roots;
+}
+
+/** @param {ArchiveJSONLine[]} nodes @param {boolean} all */
+export function collapsedArchiveLines(nodes, all = false) {
+  /** @type {number[]} */
+  const ids = [];
+  const pending = [...nodes];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node.foldable && (all || node.long || node.depth >= 2))
+      ids.push(node.id);
+    pending.push(...node.children);
+  }
+  return ids;
+}
+
 /** @param {string} content */
 export function highlightArchiveJSON(content) {
   return content
