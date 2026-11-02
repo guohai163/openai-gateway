@@ -1,4 +1,5 @@
 // Format token text without converting JSON numbers into JavaScript numbers.
+/** @param {string} content */
 export function formatArchiveJSON(content) {
   JSON.parse(content);
   const tokens =
@@ -32,6 +33,7 @@ export function formatArchiveJSON(content) {
 
 export const archivePreviewLimit = 256 * 1024;
 
+/** @param {string} content */
 export function highlightArchiveJSON(content) {
   return content
     .split(
