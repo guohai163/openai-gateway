@@ -19,7 +19,33 @@ const selectUpstream = `SELECT k.id,k.secret,k.probe_model,k.platform ` + upstre
 const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
-	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) ORDER BY k.id`, model, pin)
+	return a.keyCandidates(ctx, model, pin, GatewayKey{})
+}
+
+// Keep the configured pool order and denominator even when a member is down.
+func primaryPoolOrder(ids []string, started, now time.Time) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	elapsed := now.Sub(started)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	period := 24 * time.Hour
+	index := int((elapsed % period) / (period / time.Duration(len(ids))))
+	if index >= len(ids) {
+		index = len(ids) - 1
+	}
+	ordered := append([]string{}, ids[index:]...)
+	return append(ordered, ids[:index]...)
+}
+
+func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayKey) ([]Upstream, error) {
+	ids := key.UpstreamKeyIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND (cardinality($3::text[])=0 OR k.id=ANY($3::text[])) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) ORDER BY k.id`, model, pin, ids)
 	if e != nil {
 		return nil, e
 	}
@@ -36,10 +62,22 @@ func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, er
 	if rows.Err() != nil {
 		return nil, rows.Err()
 	}
-	if len(out) > 1 && pin == "" {
+	if key.RoutingMode == "primary_backup" && pin == "" {
+		byID := make(map[string]Upstream, len(out))
+		for _, u := range out {
+			byID[u.ID] = u
+		}
+		out = []Upstream{}
+		for _, id := range primaryPoolOrder(ids, key.RoutingStartedAt, time.Now()) {
+			if u, ok := byID[id]; ok {
+				out = append(out, u)
+			}
+		}
+	} else if len(out) > 1 && pin == "" {
+		counter := key.ID + ":" + model
 		a.mu.Lock()
-		n := a.rr[model]
-		a.rr[model] = n + 1
+		n := a.rr[counter]
+		a.rr[counter] = n + 1
 		a.mu.Unlock()
 		i := int(n % uint64(len(out)))
 		out = append(out[i:], out[:i]...)
@@ -99,7 +137,7 @@ func (a *App) classify(ctx context.Context, u Upstream, status int, code string,
 		// Without organization ownership, only the key that received the error is blocked.
 		_, e := a.DB.Exec(ctx, "UPDATE upstream_keys SET quota_blocked=true,last_error=$2,next_probe_at=COALESCE(next_probe_at,now()+interval '5 minutes') WHERE id=$1", u.ID, code)
 		return e == nil
-	case "invalid_api_key", "invalid_authentication":
+	case "invalid_api_key", "invalid_authentication", "account_deactivated", "organization_deactivated", "account_suspended", "organization_suspended":
 		_, e := a.DB.Exec(ctx, "UPDATE upstream_keys SET invalid=true,last_error=$2 WHERE id=$1", u.ID, code)
 		return e == nil
 	case "rate_limit_exceeded", "slow_down", "rate_limit_error":

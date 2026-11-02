@@ -50,6 +50,7 @@ import { SpendingDetails, usd } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
+import { KeyRoutingFields } from "./KeyRoutingFields";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import "./style.css";
 type Row = Record<string, any>;
@@ -322,6 +323,15 @@ function App() {
     const input: Row = Object.fromEntries(form);
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
+      if (isAdmin) {
+        input.upstream_key_ids = input.routing_all === "true" ? [] : form.getAll("upstream_key_ids");
+        if (input.routing_ready !== "true" || (input.routing_mode === "primary_backup" && input.upstream_key_ids.length < 2) || (input.routing_all !== "true" && !input.upstream_key_ids.length) || input.upstream_key_ids.length > 64) {
+          setError("invalid_routing_pool");
+          return;
+        }
+        delete input.routing_all;
+        delete input.routing_ready;
+      }
       if (isAdmin && settings.storage) {
         input.store_input = form.has("store_input");
         input.store_output = form.has("store_output");
@@ -489,6 +499,7 @@ function App() {
   const columns: Record<string, string[]> = {
     upstream_keys: [
       "name",
+      "enabled",
       "month_cost",
       "models",
       "status",
@@ -501,6 +512,7 @@ function App() {
       "month_cost",
       "models",
       "cidrs",
+      ...(isAdmin ? ["keyRouting"] : []),
       "status",
       "expires_at",
     ],
@@ -509,6 +521,14 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "keyRouting") return <span>{t(r.routing_mode === "primary_backup" ? "routingPrimaryBackup" : "routingRoundRobin")}<small className="routing-summary">{r.upstream_key_ids?.length ? t("routingSelectedCount").replace("{count}", String(r.upstream_key_ids.length)) : t("routingAllUpstreams")}</small></span>;
+    if (c === "enabled" && page === "upstream_keys") return <button type="button" role="switch" aria-checked={!!r.enabled} aria-label={`${t("enabled")} ${r.name}`} className={`upstream-toggle ${r.enabled ? "is-on" : ""}`} disabled={busy || loading} onClick={async () => {
+      setBusy(true);
+      setError("");
+      try { await api(`upstream_keys/${encodeURIComponent(r.id)}`, {method: "PATCH", body: JSON.stringify({enabled: !r.enabled})}); await load(); }
+      catch (error) { fail(error); }
+      finally { setBusy(false); }
+    }}><span aria-hidden="true" />{t(r.enabled ? "on" : "off")}</button>;
     if (c === "ip" && page === "logs")
       return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
     if (c === "month_cost")
@@ -1180,6 +1200,7 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
+                    {isAdmin && <KeyRoutingFields key={modal.id || "new"} row={modal} api={api} t={t} />}
                     {isAdmin && settings.storage && (
                       <fieldset className="archive-preferences">
                         <legend>{t("storePayloads")}</legend>

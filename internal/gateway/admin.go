@@ -16,15 +16,17 @@ import (
 )
 
 type resourceInput struct {
-	Name          string    `json:"name"`
-	Key           string    `json:"key"`
-	ProbeModel    *string   `json:"probe_model"`
-	Enabled       *bool     `json:"enabled"`
-	Models        *[]string `json:"models"`
-	CIDRs         *[]string `json:"cidrs"`
-	ExpiresInDays *int      `json:"expires_in_days"`
-	StoreInput    *bool     `json:"store_input"`
-	StoreOutput   *bool     `json:"store_output"`
+	Name           string    `json:"name"`
+	Key            string    `json:"key"`
+	ProbeModel     *string   `json:"probe_model"`
+	Enabled        *bool     `json:"enabled"`
+	Models         *[]string `json:"models"`
+	CIDRs          *[]string `json:"cidrs"`
+	ExpiresInDays  *int      `json:"expires_in_days"`
+	StoreInput     *bool     `json:"store_input"`
+	StoreOutput    *bool     `json:"store_output"`
+	RoutingMode    *string   `json:"routing_mode"`
+	UpstreamKeyIDs *[]string `json:"upstream_key_ids"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -299,7 +301,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
-		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil) {
+		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil) {
 			writeError(w, 403, "forbidden")
 			return
 		}
@@ -395,13 +397,50 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			}
 			expiry = time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
 		}
-		if create && ordinary(r) {
-			keyTx, e = a.DB.Begin(ctx)
+		keyTx, e = a.DB.Begin(ctx)
+		if e != nil {
+			adminDBError(w, e)
+			return
+		}
+		defer keyTx.Rollback(ctx)
+		writer = keyTx
+		mode, ids := "round_robin", []string{}
+		if !create {
+			e = keyTx.QueryRow(ctx, "SELECT routing_mode,upstream_key_ids FROM gateway_keys WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&mode, &ids)
 			if e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					writeError(w, 404, "not_found")
+				} else {
+					adminDBError(w, e)
+				}
+				return
+			}
+		}
+		if in.RoutingMode != nil {
+			mode = *in.RoutingMode
+		}
+		if in.UpstreamKeyIDs != nil {
+			ids = *in.UpstreamKeyIDs
+		}
+		if ids == nil {
+			ids = []string{}
+		}
+		if !validRoutingPool(mode, ids) {
+			writeError(w, 400, "invalid_routing_pool")
+			return
+		}
+		if in.UpstreamKeyIDs != nil && len(ids) > 0 {
+			var count int
+			if e = keyTx.QueryRow(ctx, "SELECT count(*) FROM upstream_keys WHERE id=ANY($1::text[])", ids).Scan(&count); e != nil {
 				adminDBError(w, e)
 				return
 			}
-			defer keyTx.Rollback(ctx)
+			if count != len(ids) {
+				writeError(w, 400, "invalid_routing_pool")
+				return
+			}
+		}
+		if create && ordinary(r) {
 			var owner string
 			e = keyTx.QueryRow(ctx, "SELECT id FROM users WHERE id=$1 AND enabled FOR UPDATE", actor(r).ID).Scan(&owner)
 			if e != nil {
@@ -425,10 +464,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			var secret []byte
 			secret, e = seal(a.Config.MasterKey, token)
 			if e == nil {
-				tag, e = writer.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output,user_id) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false),$12)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput, keyOwner(r))
+				tag, e = writer.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output,user_id,routing_mode,upstream_key_ids) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false),$12,$13,$14)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput, keyOwner(r), mode, ids)
 			}
 		} else {
-			tag, e = a.DB.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output) WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput)
+			tag, e = writer.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output),routing_started_at=CASE WHEN routing_mode<>$10 OR upstream_key_ids<>$11::text[] THEN now() ELSE routing_started_at END,routing_mode=$10,upstream_key_ids=$11 WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput, mode, ids)
 		}
 	default:
 		writeError(w, 404, "not_found")

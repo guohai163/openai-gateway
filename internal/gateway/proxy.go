@@ -103,26 +103,18 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "service_tier_not_allowed")
 		return
 	}
-	attempted := map[string]bool{}
+	candidates, err := a.keyCandidates(r.Context(), model, pin, k)
+	if err != nil {
+		writeError(w, 503, "database_unavailable")
+		return
+	}
+	if len(candidates) == 0 {
+		writeError(w, 503, "no_available_upstream")
+		return
+	}
 	start := time.Now()
-	for attempt := 1; attempt <= 3; attempt++ {
-		candidates, e := a.candidates(r.Context(), model, pin)
-		if e != nil {
-			writeError(w, 503, "database_unavailable")
-			return
-		}
-		var u Upstream
-		for _, candidate := range candidates {
-			if !attempted[candidate.ID] {
-				u = candidate
-				break
-			}
-		}
-		if u.ID == "" {
-			writeError(w, 503, "no_available_upstream")
-			return
-		}
-		attempted[u.ID] = true
+	for index, u := range candidates {
+		attempt := index + 1
 		u.ServiceTier = serviceTier
 		upstreamPath := path
 		if r.URL.RawQuery != "" {
@@ -156,7 +148,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			code := errorCode(b)
 			retry := a.classify(r.Context(), u, resp.StatusCode, code, resp.Header)
 			a.logAttempt(k, u, r, resp.StatusCode, code, start, Usage{}, responseID, attempt)
-			if retry && pin == "" && attempt < 3 {
+			if retry && pin == "" && attempt < len(candidates) {
 				continue
 			}
 			if readErr != nil {
@@ -223,7 +215,11 @@ func (a *App) logAttempt(k GatewayKey, u Upstream, r *http.Request, status int, 
 	a.record(ctx, k, u, r.Method, r.URL.Path, status, code, start, usage, id, attempt, "inference")
 }
 func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
-	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform='openai')) ORDER BY m.model`, k.PricedOnly)
+	ids := k.UpstreamKeyIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND (cardinality($2::text[])=0 OR k.id=ANY($2::text[])) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform='openai')) ORDER BY m.model`, k.PricedOnly, ids)
 	if e != nil {
 		writeError(w, 503, "database_unavailable")
 		return

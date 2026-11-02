@@ -21,6 +21,9 @@ type GatewayKey struct {
 	StoreInput, StoreOutput bool
 	PricedOnly              bool
 	Models                  []string
+	RoutingMode             string
+	UpstreamKeyIDs          []string
+	RoutingStartedAt        time.Time
 	IP                      netip.Addr
 }
 
@@ -237,7 +240,7 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 		var k GatewayKey
 		var cidrs []string
 		var canReveal bool
-		e := a.DB.QueryRow(r.Context(), `SELECT g.id,g.models,ARRAY(SELECT x::text FROM unnest(g.cidrs) x),g.secret IS NOT NULL,g.name,g.store_input,g.store_output,u.role='user' FROM gateway_keys g JOIN users u ON u.id=g.user_id WHERE g.token_hash=$1 AND g.enabled AND u.enabled AND g.deleted_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal, &k.Name, &k.StoreInput, &k.StoreOutput, &k.PricedOnly)
+		e := a.DB.QueryRow(r.Context(), `SELECT g.id,g.models,ARRAY(SELECT x::text FROM unnest(g.cidrs) x),g.secret IS NOT NULL,g.name,g.store_input,g.store_output,u.role='user',g.routing_mode,g.upstream_key_ids,g.routing_started_at FROM gateway_keys g JOIN users u ON u.id=g.user_id WHERE g.token_hash=$1 AND g.enabled AND u.enabled AND g.deleted_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal, &k.Name, &k.StoreInput, &k.StoreOutput, &k.PricedOnly, &k.RoutingMode, &k.UpstreamKeyIDs, &k.RoutingStartedAt)
 		if e != nil {
 			writeError(w, 401, "invalid_api_key")
 			return

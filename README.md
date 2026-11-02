@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.10.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.10.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.10.0`。
+最新版本：[v1.11.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.11.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.11.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -287,7 +287,11 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 ## 调度、额度与统计
 
-- 独立请求按模型轮询所有符合条件的 Key。相同 OpenAI 项目/组织中的 Key 共享上游配额及限流，不会增加上游实际容量。
+- 管理员可在私钥新建/编辑页设置“上游调度”，默认负载轮询全部可用上游，也可勾选固定账号池（最多64个）。普通用户不能读取或修改上游账号池，但其请求会执行管理员保存的策略；私钥模型列表也限定在所选池内。
+- 主备模式至少选择2个账号，可调整顺序；从保存模式/账号池变更时起，将24小时均分，2个每12小时、3个每8小时、4个每6小时切换计划主号。轮换锚点保存在数据库，重启或修改无关配置不会重置；停用账号不改变周期和顺序。主号不可用时按顺序选择下一个可用账号；主号恢复后同一时段可重新优先使用它。
+- 上游列表“启用”开关直接控制调度资格，不清除凭据失效或欠费状态。响应明确报告凭据失效、账号停用或额度不足时，更新账号状态并遍历所选池尝试后续账号；不会跳到未选中的账号。网络超时、5xx 和已开始的流不重放。Responses 续接仍绑定原上游；原账号被移出池或不可用时返回错误。
+- 管理接口 `POST/PATCH /admin/api/gateway_keys[/ID]` 支持管理员字段 `routing_mode`（`round_robin` / `primary_backup`）和有序 `upstream_key_ids` 数组；空数组表示全部上游，仅适用于轮询模式。普通编辑若省略这两个字段则保留原配置。新增迁移 `012_key_routing.sql`，升级前备份数据库并保留 `MASTER_KEY`。
+- 独立请求默认按私钥和模型轮询符合条件的 Key。相同 OpenAI 项目/组织中的 Key 共享上游配额及限流，不会增加上游实际容量。
 - 首次模型同步失败的 Key 不参与调度，后续同步失败保留旧列表和原始响应。每次成功同步事务保存完整模型响应（含模型元数据），可调度列表排除已下线模型。正常每 10 分钟同步，可手动刷新。
 - 仅上游明确拒绝的认证、额度、限流及模型不存在错误可触发候选切换。网络超时、5xx 或流已开始均不自动重放，避免重复执行或收费。
 - `credit_balance_exhausted`、组织/项目支出限制和 `insufficient_quota` 均只阻断返回错误的 Key，不影响其他 Key。限流按 Key + 模型冷却并遵守 `Retry-After`；没有上游组织归属信息时，不推断多个 Key 的共享额度。

@@ -117,7 +117,7 @@ func (a *App) keyMonthlyScope(resource string, limited bool) string {
 		if limited {
 			filter += ` AND user_id=$5`
 		} else {
-			fields += `,store_input,store_output,(SELECT email FROM users u WHERE u.id=gateway_keys.user_id) AS owner_email`
+			fields += `,routing_mode,upstream_key_ids,routing_started_at,store_input,store_output,(SELECT email FROM users u WHERE u.id=gateway_keys.user_id) AS owner_email`
 		}
 		base = `SELECT ` + fields + ` FROM gateway_keys WHERE ` + filter
 	}
