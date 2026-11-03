@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.12.2 - 2026-11-03
+
+### Fixed
+
+- 修复启用私钥平台缓存后上游返回400 `unknown_parameter`：不再向 `messages[0].content[0].prompt_cache_breakpoint` 注入 `ttl`。断点仅发送 `mode=explicit`，统一继承请求级 `prompt_cache_options.ttl`，避免拒绝断点内时长字段的上游部署报错。
+- 保留Chat实际30m、Responses按配置30m/12h的行为；覆盖调用方原有断点时同样移除断点TTL。回归测试模拟线上返回的同一400错误，并检查两个接口及时长组合。
+
+### Upgrade
+
+- 无新增数据库迁移，无需修改私钥设置或调用程序。固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.12.2`。
+
 ## v1.12.1 - 2026-11-03
 
 ### Added

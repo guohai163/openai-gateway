@@ -87,7 +87,9 @@ func applyPromptCache(body []byte, path, model string, key GatewayKey) ([]byte, 
 			_ = json.Unmarshal(last["type"], &partType)
 			_ = json.Unmarshal(last["text"], &text)
 			if partType != textType || text == "" { return nil, "", "", errors.New("unsupported_system_content") }
-			last["prompt_cache_breakpoint"] = cacheJSON(map[string]string{"mode": "explicit", "ttl": ttl})
+			// Inherit TTL from prompt_cache_options. Some upstream deployments
+			// reject ttl on a content-block breakpoint with unknown_parameter.
+			last["prompt_cache_breakpoint"] = cacheJSON(map[string]string{"mode": "explicit"})
 			message["content"] = cacheJSON(parts)
 			result = "first_system"
 		}

@@ -10,6 +10,31 @@ import (
 	"testing"
 )
 
+func TestPromptCacheTTLOnlyAtRequestLevel(t *testing.T) {
+	for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
+		for _, configuredTTL := range []string{"30m", "12h"} {
+			t.Run(path+"/"+configuredTTL, func(t *testing.T) {
+				field, textType, wantTTL := "messages", "text", "30m"
+				if path == "/v1/responses" { field, textType, wantTTL = "input", "input_text", configuredTTL }
+				// Replace caller-supplied breakpoint TTL too, not just strings.
+				body := cacheJSON(map[string]any{field: []any{map[string]any{
+					"role": "system", "content": []any{map[string]any{"type": textType, "text": "fixed instructions", "prompt_cache_breakpoint": map[string]string{"mode": "explicit", "ttl": "12h"}}},
+				}}})
+				out, ttl, result, err := applyPromptCache(body, path, "gpt-6.1-terra", GatewayKey{ID: "key", PromptCacheMode: "first_system", PromptCacheTTL: configuredTTL})
+				if err != nil || ttl != wantTTL || result != "first_system" { t.Fatal(err, ttl, result) }
+				var request cacheObject
+				if err := json.Unmarshal(out, &request); err != nil { t.Fatal(err) }
+				var options map[string]string
+				if err := json.Unmarshal(request["prompt_cache_options"], &options); err != nil || options["ttl"] != wantTTL || options["mode"] != "explicit" { t.Fatal(err, string(out)) }
+				var messages []struct { Content []cacheObject }
+				if err := json.Unmarshal(request[field], &messages); err != nil || len(messages) != 1 || len(messages[0].Content) != 1 { t.Fatal(err, string(out)) }
+				var breakpoint map[string]string
+				if err := json.Unmarshal(messages[0].Content[0]["prompt_cache_breakpoint"], &breakpoint); err != nil || len(breakpoint) != 1 || breakpoint["mode"] != "explicit" { t.Fatal("unsupported field reintroduced", err, string(out)) }
+			})
+		}
+	}
+}
+
 func TestManagedPromptCachePreservesContentAndOverridesMarkers(t *testing.T) {
 	body := []byte(`{"model":"gpt-6.1-terra","messages":[{"role":"system","content":"fixed\n指令"},{"role":"system","content":[{"type":"text","text":"second","prompt_cache_breakpoint":{"mode":"explicit","ttl":"12h"}}]},{"role":"user","content":[{"type":"text","text":"dynamic logs","prompt_cache_breakpoint":{"mode":"explicit","ttl":"12h"}}]}],"tools":[{"type":"function","function":{"name":"test","parameters":{"type":"object","properties":{"prompt_cache_breakpoint":{"type":"string"}}}}}],"large_id":9007199254740993123,"temperature":0.3,"prompt_cache_key":"caller","prompt_cache_options":{"mode":"implicit","ttl":"12h"},"prompt_cache_retention":"24h"}`)
 	key := GatewayKey{ID: "private-key", PromptCacheMode: "first_system", PromptCacheTTL: "12h"}
@@ -44,7 +69,9 @@ func TestPromptCacheResponsesMissingSystemAndPassthrough(t *testing.T) {
 	if err := json.Unmarshal(out, &responseRequest); err != nil { t.Fatal(err) }
 	var blocks []cacheObject
 	if err := json.Unmarshal(responseRequest.Input[0].Content, &blocks); err != nil { t.Fatal(err) }
-	if len(blocks) != 2 || blocks[0]["prompt_cache_breakpoint"] != nil || !strings.Contains(string(blocks[1]["prompt_cache_breakpoint"]), "12h") { t.Fatal("breakpoint not at complete system end", string(out)) }
+	if len(blocks) != 2 || blocks[0]["prompt_cache_breakpoint"] != nil || string(blocks[1]["prompt_cache_breakpoint"]) != `{"mode":"explicit"}` { t.Fatal("breakpoint must inherit request-level TTL at complete system end", string(out)) }
+	var responseOptions struct { Options map[string]string `json:"prompt_cache_options"` }
+	if err := json.Unmarshal(out, &responseOptions); err != nil || responseOptions.Options["ttl"] != "12h" { t.Fatal("Responses lost 12h request TTL", err, string(out)) }
 	for _, input := range []string{`{"messages":[{"role":"user","content":"logs"},{"role":"system","content":"late system"}]}`, `{"messages":[{"role":"system","content":""},{"role":"user","content":"logs"}]}`} {
 		out, _, result, err := applyPromptCache([]byte(input), "/v1/chat/completions", "gpt-6.1-terra", key)
 		if err != nil || result != "no_system" || strings.Contains(string(out), `"prompt_cache_breakpoint"`) { t.Fatal(err, result, string(out)) }
@@ -79,6 +106,22 @@ func TestPromptCachePolicyPersistenceAndActualRequest(t *testing.T) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Options["ttl"] != "30m" || input.Options["mode"] != "explicit" { t.Error("policy not injected", err, input.Options) }
 		if len(input.Messages) < 1 || !strings.Contains(string(input.Messages[0].Content), "prompt_cache_breakpoint") { t.Error("system breakpoint missing") }
+		var blocks []cacheObject
+		if len(input.Messages) > 0 {
+			if err := json.Unmarshal(input.Messages[0].Content, &blocks); err != nil { t.Error(err) }
+		}
+		if len(blocks) != 1 {
+			t.Error("missing first system block")
+			w.WriteHeader(400)
+			return
+		}
+		var breakpoint map[string]string
+		if err := json.Unmarshal(blocks[0]["prompt_cache_breakpoint"], &breakpoint); err != nil { t.Error(err) }
+		if _, exists := breakpoint["ttl"]; exists {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"error":{"message":"Unknown parameter: 'messages[0].content[0].prompt_cache_breakpoint.ttl'.","param":"messages[0].content[0].prompt_cache_breakpoint.ttl","code":"unknown_parameter"}}`)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"usage":{"prompt_tokens":100,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":40,"cache_write_tokens":60}}}`)
 	}))
