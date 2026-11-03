@@ -103,6 +103,18 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "service_tier_not_allowed")
 		return
 	}
+	if r.Method == "POST" {
+		var cacheErr error
+		body, k.EffectiveCacheTTL, k.CachePolicyResult, cacheErr = applyPromptCache(body, path, model, k)
+		if cacheErr != nil {
+			status := http.StatusBadRequest
+			if cacheErr.Error() == "request_too_large" { status = http.StatusRequestEntityTooLarge }
+			writeError(w, status, cacheErr.Error())
+			return
+		}
+		if k.CachePolicyResult != "" { w.Header().Set("X-Gateway-Prompt-Cache", k.CachePolicyResult) }
+		if k.EffectiveCacheTTL != "" { w.Header().Set("X-Gateway-Prompt-Cache-TTL", k.EffectiveCacheTTL) }
+	}
 	candidates, err := a.keyCandidates(r.Context(), model, pin, k)
 	if err != nil {
 		writeError(w, 503, "database_unavailable")
@@ -210,6 +222,14 @@ func copyHeaders(w http.ResponseWriter, h http.Header) {
 	w.Header().Set("Cache-Control", "no-store")
 }
 func (a *App) logAttempt(k GatewayKey, u Upstream, r *http.Request, status int, code string, start time.Time, usage Usage, id string, attempt int) {
+	usage.CachePolicy, usage.CacheTTL = k.CachePolicyResult, k.EffectiveCacheTTL
+	// Only infer write lifetime for the policy whose outgoing markers we control.
+	if r.URL.Path == "/v1/chat/completions" && k.CachePolicyResult == "first_system" && !usage.WriteKnown && usage.CacheWrite > 0 && usage.InputKnown && usage.CachedKnown && usage.Cached+usage.CacheWrite <= usage.Input {
+		if k.EffectiveCacheTTL == "30m" {
+			usage.Write30m, usage.Write12h, usage.WriteKnown = usage.CacheWrite, 0, true
+			usage.WriteInferred = true
+		}
+	}
 	ctx, c := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer c()
 	a.record(ctx, k, u, r.Method, r.URL.Path, status, code, start, usage, id, attempt, "inference")

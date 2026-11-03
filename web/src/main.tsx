@@ -51,6 +51,7 @@ import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
 import { KeyRoutingFields } from "./KeyRoutingFields";
+import { KeyCacheFields } from "./KeyCacheFields";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import "./style.css";
 type Row = Record<string, any>;
@@ -1201,6 +1202,7 @@ function App() {
                 {page === "gateway_keys" && (
                   <>
                     {isAdmin && <KeyRoutingFields key={modal.id || "new"} row={modal} api={api} t={t} />}
+                    {isAdmin && <KeyCacheFields key={`cache-${modal.id || "new"}`} row={modal} t={t} />}
                     {isAdmin && settings.storage && (
                       <fieldset className="archive-preferences">
                         <legend>{t("storePayloads")}</legend>

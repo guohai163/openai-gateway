@@ -9,8 +9,10 @@ type Usage struct {
 	InputKnown, OutputKnown, CachedKnown bool
 	NonText                              bool
 	Model, ServiceTier                   string
+	CachePolicy, CacheTTL                string
 	Write30m, Write12h                   int64
 	WriteKnown                           bool
+	WriteInferred                        bool
 	Image                                bool
 	TextInput, ImageInput                int64
 	TextOutput, ImageOutput              int64

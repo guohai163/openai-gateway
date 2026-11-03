@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.12.0 - 2026-11-03
+
+### Added
+
+- 私钥新增管理员“提示词缓存”配置：默认跟随调用方，可选择由平台缓存首个完整前置 system 消息，并选择30分钟或12小时。
+- 平台接管时注入显式缓存模式，清理调用方消息中的缓存断点，在首个system末尾设置唯一断点并固定私钥缓存命名空间；保留消息内容、顺序、工具定义及大整数原值。无前置system时不添加断点，GPT-5.6之前及未知模型保持透传。
+- Chat Completions 自动使用30分钟，Responses使用所选时长。响应头 `X-Gateway-Prompt-Cache` / `X-Gateway-Prompt-Cache-TTL` 和费用快照记录实际策略及时长，界面展示生效时长。
+- 平台管理的Chat缓存写入若缺少有效期分项，可根据实际注入的30分钟策略估算，快照标记 `cache_write_lifetime_source=gateway_policy`；不改写历史费用。
+
+### Upgrade
+
+- 新增 `013_prompt_cache_policy.sql`。升级前备份数据库，保留 `MASTER_KEY`。已有私钥默认跟随调用方，普通用户不可修改平台缓存策略。输入JSON归档保留调用方原文；缓存策略由费用快照及响应头记录。
+- 固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.12.0`。
+
 ## v1.11.0 - 2026-11-03
 
 ### Added

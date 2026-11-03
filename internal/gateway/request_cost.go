@@ -54,6 +54,10 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 		"long_context_policy": p.LongPolicy, "long_context_threshold": p.Threshold,
 	}}
 	c.Snapshot["write_30m_tokens"], c.Snapshot["write_12h_tokens"] = u.Write30m, u.Write12h
+	if u.CachePolicy != "" {
+		c.Snapshot["prompt_cache_policy"], c.Snapshot["prompt_cache_ttl"] = u.CachePolicy, u.CacheTTL
+	}
+	if u.WriteInferred { c.Snapshot["cache_write_lifetime_source"] = "gateway_policy" }
 	var reasons []string
 	if !current {
 		reasons = append(reasons, "price_missing_or_stale")

@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.11.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.11.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.11.0`。
+最新版本：[v1.12.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -267,6 +267,11 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 图片模型分项价格由 `009_modality_prices.sql` 增加到现有定价表，更新后手动同步即可补全。`gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 的文本、图像 Token 价格分行显示，缺失分项仍标红。直接 Images API 按 `usage.input_tokens_details.text_tokens`、`image_tokens` 和输出图像 Token 分别计算，快照保留分项价格和用量，计入现有自然月消费及模型统计。缺少或不一致的用量显示未知/部分费用。GPT Image 2 / 2.5 的缓存单价仅适用于 Responses API 的图片工具，直接 Images API 显示“缓存不适用”，参考[官方缓存输入价格说明](https://developers.openai.com/api/docs/guides/image-generation#cached-input-pricing)。Responses/Chat 中无法归属到具体图片模型的多模态用量仍不套用文本费用估算。
 
 ## 调用记录：费用与缓存
+
+- 管理员可在私钥新建/编辑页配置“提示词缓存”：`prompt_cache_mode=inherit`（默认跟随调用方）或 `first_system`（缓存首个完整前置system），`prompt_cache_ttl=30m|12h`。普通用户不能读取或修改私钥的缓存配置，实际请求仍执行管理员保存的策略。
+- 平台缓存适用于GPT-5.6及以后模型的Chat Completions和Responses。平台强制显式缓存并覆盖原有缓存参数和消息/内容块上的断点，仅在第一条前置system消息末尾写入缓存；用户日志不设断点，不改变文本、消息顺序或工具定义。没有前置system（包括仅有Responses顶层instructions）时不添加断点、不缓存动态输入。未知或较旧模型保持原样。
+- Chat当前自动使用30m，即便私钥选择12h；Responses按配置使用30m/12h。实际策略和TTL见响应头 `X-Gateway-Prompt-Cache` / `X-Gateway-Prompt-Cache-TTL` 和 `pricing_snapshot.prompt_cache_policy` / `prompt_cache_ttl`，费用详情中显示实际时长。输入JSON存储保留请求者原文，不是注入后的请求正文。官方接口兼容性参考：[Chat参数](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[缓存说明](https://developers.openai.com/api/docs/guides/prompt-caching)。
+- 仅平台管理的Chat请求、所有消息断点均受控且用量一致时，允许按实际注入的30m推定缺失的缓存写入有效期分项；快照明确标记 `cache_write_lifetime_source=gateway_policy`。调用方自行控制的缓存仍要求上游提供有效期明细，不追溯修改历史费用。新增迁移 `013_prompt_cache_policy.sql`，升级前备份数据库。
 
 - 日志默认按表格可用宽度显示 3～8 个主要列。“显示列”可手动勾选并按账号保存在当前浏览器，至少保留一列；“恢复自动布局”重新跟随窗口尺寸。手动选择较多列时可在表格内横向滚动。
 

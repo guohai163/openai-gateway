@@ -166,6 +166,7 @@ export function RequestCost({ row, locale, t }: Props) {
             </>
           )}
           {p.long_context && <small>{t("longContextApplied")}</small>}
+          {p.prompt_cache_policy === "first_system" && p.prompt_cache_ttl && <small>{t("promptCacheEffectiveTTL")}: {p.prompt_cache_ttl}</small>}
           {p.response_model && p.response_model !== row.model && (
             <small>
               {t("responseModel")}: {p.response_model}
