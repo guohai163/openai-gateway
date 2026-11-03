@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.12.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.0`。
+最新版本：[v1.12.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.1`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -267,6 +267,8 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 图片模型分项价格由 `009_modality_prices.sql` 增加到现有定价表，更新后手动同步即可补全。`gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 的文本、图像 Token 价格分行显示，缺失分项仍标红。直接 Images API 按 `usage.input_tokens_details.text_tokens`、`image_tokens` 和输出图像 Token 分别计算，快照保留分项价格和用量，计入现有自然月消费及模型统计。缺少或不一致的用量显示未知/部分费用。GPT Image 2 / 2.5 的缓存单价仅适用于 Responses API 的图片工具，直接 Images API 显示“缓存不适用”，参考[官方缓存输入价格说明](https://developers.openai.com/api/docs/guides/image-generation#cached-input-pricing)。Responses/Chat 中无法归属到具体图片模型的多模态用量仍不套用文本费用估算。
 
 ## 调用记录：费用与缓存
+
+- 上游HTTP错误可点击失败状态查看已保存的错误代码、参数和说明（新请求才保存，旧记录不回填）。上游拒绝同时写入 `WARN upstream request rejected` 容器日志，包含 `request_uuid`、`model`、`upstream_key_id`、`status`、`error_code`、`error_param`、`error_message` 和实际缓存策略/时长；错误说明最多2000字符，参数最多256字符，不写入认证头、密钥或完整请求/响应正文。可用 `docker logs --since 10m openai-gateway` 查看。
 
 - 管理员可在私钥新建/编辑页配置“提示词缓存”：`prompt_cache_mode=inherit`（默认跟随调用方）或 `first_system`（缓存首个完整前置system），`prompt_cache_ttl=30m|12h`。普通用户不能读取或修改私钥的缓存配置，实际请求仍执行管理员保存的策略。
 - 平台缓存适用于GPT-5.6及以后模型的Chat Completions和Responses。平台强制显式缓存并覆盖原有缓存参数和消息/内容块上的断点，仅在第一条前置system消息末尾写入缓存；用户日志不设断点，不改变文本、消息顺序或工具定义。没有前置system（包括仅有Responses顶层instructions）时不添加断点、不缓存动态输入。未知或较旧模型保持原样。

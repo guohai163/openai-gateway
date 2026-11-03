@@ -10,6 +10,7 @@ type Usage struct {
 	NonText                              bool
 	Model, ServiceTier                   string
 	CachePolicy, CacheTTL                string
+	ErrorMessage, ErrorParam             string
 	Write30m, Write12h                   int64
 	WriteKnown                           bool
 	WriteInferred                        bool

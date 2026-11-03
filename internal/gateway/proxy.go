@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -158,8 +159,12 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			b, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			code := errorCode(b)
+			var failure upstreamError
+			_ = json.Unmarshal(b, &failure)
+			failureUsage := Usage{ErrorMessage: boundedErrorText(failure.Error.Message, 2000), ErrorParam: boundedErrorText(failure.Error.Param, 256)}
+			logUpstreamRejection(slog.Default(), k, u, path, resp.StatusCode, attempt, code, failureUsage)
 			retry := a.classify(r.Context(), u, resp.StatusCode, code, resp.Header)
-			a.logAttempt(k, u, r, resp.StatusCode, code, start, Usage{}, responseID, attempt)
+			a.logAttempt(k, u, r, resp.StatusCode, code, start, failureUsage, responseID, attempt)
 			if retry && pin == "" && attempt < len(candidates) {
 				continue
 			}

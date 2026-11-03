@@ -1516,6 +1516,12 @@ tbody tr:hover .actions-column {
 .request-log-table td {
   vertical-align: top;
 }
+.request-error-details > summary { cursor: pointer; list-style: none; }
+.request-error-details > summary::-webkit-details-marker { display: none; }
+.request-error-hint { display: block; font-size: 11px; margin-top: 5px; }
+.request-error-body { margin-top: 10px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.request-error-body p + p { margin-top: 8px; }
+.request-error-details[open] { min-width: 230px; }
 .request-log-table {
   table-layout: fixed;
 }

@@ -107,6 +107,7 @@ type upstreamError struct {
 		Code  string `json:"code"`
 		Type  string `json:"type"`
 		Param string `json:"param"`
+		Message string `json:"message"`
 	} `json:"error"`
 }
 

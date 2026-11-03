@@ -52,6 +52,7 @@ import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
 import { KeyRoutingFields } from "./KeyRoutingFields";
 import { KeyCacheFields } from "./KeyCacheFields";
+import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import "./style.css";
 type Row = Record<string, any>;
@@ -567,9 +568,7 @@ function App() {
       return <RequestCost row={r} locale={locale} t={t} />;
     if (c === "status")
       return page === "logs" ? (
-        <span className={`http-status ${v < 400 ? "success" : "failed"}`}>
-          {v}
-        </span>
+        <RequestStatus row={r} t={t} />
       ) : (
         <span className={"badge " + status(r)}>
           <i />

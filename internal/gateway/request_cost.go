@@ -54,6 +54,9 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 		"long_context_policy": p.LongPolicy, "long_context_threshold": p.Threshold,
 	}}
 	c.Snapshot["write_30m_tokens"], c.Snapshot["write_12h_tokens"] = u.Write30m, u.Write12h
+	if u.ErrorMessage != "" || u.ErrorParam != "" {
+		c.Snapshot["upstream_error"] = map[string]string{"message": u.ErrorMessage, "param": u.ErrorParam}
+	}
 	if u.CachePolicy != "" {
 		c.Snapshot["prompt_cache_policy"], c.Snapshot["prompt_cache_ttl"] = u.CachePolicy, u.CacheTTL
 	}
