@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.12.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.2`。
+最新版本：[v1.12.3](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.3) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.3`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
 
@@ -273,7 +273,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 管理员可在私钥新建/编辑页配置“提示词缓存”：`prompt_cache_mode=inherit`（默认跟随调用方）或 `first_system`（缓存首个完整前置system），`prompt_cache_ttl=30m|12h`。普通用户不能读取或修改私钥的缓存配置，实际请求仍执行管理员保存的策略。
 - 平台缓存适用于GPT-5.6及以后模型的Chat Completions和Responses。平台强制显式缓存并覆盖原有缓存参数和消息/内容块上的断点，仅在第一条前置system消息末尾写入缓存；用户日志不设断点，不改变文本、消息顺序或工具定义。没有前置system（包括仅有Responses顶层instructions）时不添加断点、不缓存动态输入。未知或较旧模型保持原样。
 - Chat当前自动使用30m，即便私钥选择12h；Responses按配置使用30m/12h。TTL只写入请求级 `prompt_cache_options.ttl`，内容块的 `prompt_cache_breakpoint` 仅写入 `mode=explicit` 并继承请求时长，兼容不支持断点内TTL的上游部署。实际策略和TTL见响应头 `X-Gateway-Prompt-Cache` / `X-Gateway-Prompt-Cache-TTL` 和 `pricing_snapshot.prompt_cache_policy` / `prompt_cache_ttl`，费用详情中显示实际时长。输入JSON存储保留请求者原文，不是注入后的请求正文。官方接口兼容性参考：[Chat参数](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[缓存说明](https://developers.openai.com/api/docs/guides/prompt-caching)。
-- 仅平台管理的Chat请求、所有消息断点均受控且用量一致时，允许按实际注入的30m推定缺失的缓存写入有效期分项；快照明确标记 `cache_write_lifetime_source=gateway_policy`。调用方自行控制的缓存仍要求上游提供有效期明细，不追溯修改历史费用。新增迁移 `013_prompt_cache_policy.sql`，升级前备份数据库。
+- GPT-5.6 及以后模型的 Chat / Responses 请求，优先使用上游提供的缓存写入有效期分项。分项完全缺失且用量一致时，根据实际发出的请求推定：请求级与所有断点均未配置 TTL 时按官方默认 `30m`；只有一种有效时长时按该时长计算。快照以 `cache_write_lifetime_source=api_default|request|gateway_policy` 和 `cache_write_ttl` 标记依据，界面显示默认或请求配置的来源。混合时长、分项矛盾、续接请求中不可见的历史断点、较旧或未知模型仍不推定；不修改请求正文和历史费用。新增迁移 `013_prompt_cache_policy.sql`，升级前备份数据库。
 
 - 日志默认按表格可用宽度显示 3～8 个主要列。“显示列”可手动勾选并按账号保存在当前浏览器，至少保留一列；“恢复自动布局”重新跟随窗口尺寸。手动选择较多列时可在表格内横向滚动。
 
@@ -287,7 +287,8 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 输入费用 = 普通输入 Token × 输入单价 + 缓存读取 Token × 缓存输入单价 + 各有效期缓存写入 Token × 对应写入单价，再除以一百万；输出费用按输出 Token 和对应档位输出单价计算。缓存 Token 包含在总输入中，不会重复计费。长上下文阈值使用总输入 Token（含缓存），超过阈值后输入和输出均使用长上下文单价。
 - Responses 读取 `usage.input_tokens_details.cached_tokens`，Chat Completions 读取 `usage.prompt_tokens_details.cached_tokens`：大于零标记“缓存命中”并显示 Token 数；明确为零标记“未命中缓存”；未返回字段显示“缓存未知”。向量接口显示“缓存不适用”。这是 OpenAI 上游的提示词缓存；可选 S3 归档与提示词缓存独立。参考：[官方 Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
 - 普通及 SSE 响应都会旁读用量。Chat Completions 流式请求应设置 `stream_options: {"include_usage": true}`；客户端断开或上游没有返回完整用量时，不推算缺失 Token、缓存命中或金额。接口转发内容保持原样。
-- 缓存写入返回有效期明细时，分别计算 `ttl_30m_tokens` / `ttl_12h_tokens`；未提供有效期或缺少对应单价时，输入费用显示未知。Batch/Flex/Fast 等不支持的服务档位、多模态价格、工具调用费和协议中未返回的其他费用不混入文本估算；以 OpenAI 官方账单为准。
+- 缓存写入返回有效期明细时，分别计算 `ttl_30m_tokens` / `ttl_12h_tokens`；缺少明细且无法由上述默认值或单一时长确定、或缺少对应单价时，输入费用显示未知。Batch/Flex/Fast 等不支持的服务档位、多模态价格、工具调用费和协议中未返回的其他费用不混入文本估算；以 OpenAI 官方账单为准。
+- 费用详情在展开时显示于相邻列内容上方。缺少缓存写入有效期分项与缺少对应单价会分别提示，旧快照也按已保存的分项显示具体原因；已知的输出费用和缓存读取费用仍独立展示。`prompt_cache_retention=24h` 不能代替新模型的 30 分钟 / 12 小时写入配置；仅有旧参数且没有新 TTL 时，按官方默认 30 分钟推定，不会当成 12 小时写入或自动回填历史账单。
 - 重复查询、恢复流及同一 Response 的并发读取不会重复累计，页面标记“用量已计入原记录”。旧调用记录没有可靠的缓存字段及价格快照，保留原始 Token 计数，费用显示未知，不按今天的价格回填。
 
 升级迁移 `008_request_costs_and_key_reveal.sql` 自动增加私有 Key 密文、缓存写入单价和调用价格快照字段。更新镜像后请到“模型定价”手动同步一次，补全新增写入单价；保留原 `MASTER_KEY` 和数据库卷。

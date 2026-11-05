@@ -28,6 +28,7 @@ type GatewayKey struct {
 	PromptCacheTTL          string
 	EffectiveCacheTTL       string
 	CachePolicyResult       string
+	CacheWriteLifetime      cacheWriteLifetime
 	IP                      netip.Addr
 }
 

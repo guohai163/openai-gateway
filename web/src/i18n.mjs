@@ -182,6 +182,12 @@ export const messages = {
     non_text_usage: "Audio/image/video usage requires separate pricing.",
     cache_write_price_missing:
       "Cache write pricing or lifetime usage is unavailable.",
+    cache_write_lifetime_missing:
+      "Upstream did not report a complete, consistent breakdown of cache writes by 30-minute and 12-hour lifetime; input and total costs are unknown.",
+    cache_write_rate_missing: "The price for the cache write lifetime used is unavailable.",
+    cacheWriteDefaultLifetime:
+      "Upstream omitted cache write lifetime details; estimated using the API default of 30 minutes.",
+    cacheWriteRequestLifetime: "Cache write lifetime inferred from the request",
     cache_usage_missing: "Upstream did not report cache details.",
     usage_missing: "Upstream did not report complete usage.",
     image_usage_missing:
@@ -651,6 +657,12 @@ export const messages = {
     non_text_usage: "音频、图像或视频用量需按单独单价计费。",
     cache_write_price_missing:
       "上游返回了缓存写入用量，但缺少对应单价或有效期明细。",
+    cache_write_lifetime_missing:
+      "上游未返回完整且一致的 30 分钟 / 12 小时缓存写入分项，无法确定输入费用和总费用。",
+    cache_write_rate_missing: "缺少实际使用的缓存写入时长对应的单价。",
+    cacheWriteDefaultLifetime:
+      "上游未返回缓存写入时长分项，已按 API 默认的 30 分钟时长估算。",
+    cacheWriteRequestLifetime: "按请求配置推定缓存写入时长",
     cache_usage_missing: "上游未返回缓存用量明细。",
     usage_missing: "上游未返回完整用量。",
     image_usage_missing: "图片 Token 总量或文本/图像分项缺失或不一致。",

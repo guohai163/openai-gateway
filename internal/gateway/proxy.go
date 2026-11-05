@@ -115,6 +115,10 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if k.CachePolicyResult != "" { w.Header().Set("X-Gateway-Prompt-Cache", k.CachePolicyResult) }
 		if k.EffectiveCacheTTL != "" { w.Header().Set("X-Gateway-Prompt-Cache-TTL", k.EffectiveCacheTTL) }
+		k.CacheWriteLifetime = requestCacheWriteLifetime(body, path, model)
+		if k.CachePolicyResult == "first_system" && k.CacheWriteLifetime.TTL != "" {
+			k.CacheWriteLifetime.Source = "gateway_policy"
+		}
 	}
 	candidates, err := a.keyCandidates(r.Context(), model, pin, k)
 	if err != nil {
@@ -228,13 +232,7 @@ func copyHeaders(w http.ResponseWriter, h http.Header) {
 }
 func (a *App) logAttempt(k GatewayKey, u Upstream, r *http.Request, status int, code string, start time.Time, usage Usage, id string, attempt int) {
 	usage.CachePolicy, usage.CacheTTL = k.CachePolicyResult, k.EffectiveCacheTTL
-	// Only infer write lifetime for the policy whose outgoing markers we control.
-	if r.URL.Path == "/v1/chat/completions" && k.CachePolicyResult == "first_system" && !usage.WriteKnown && usage.CacheWrite > 0 && usage.InputKnown && usage.CachedKnown && usage.Cached+usage.CacheWrite <= usage.Input {
-		if k.EffectiveCacheTTL == "30m" {
-			usage.Write30m, usage.Write12h, usage.WriteKnown = usage.CacheWrite, 0, true
-			usage.WriteInferred = true
-		}
-	}
+	usage = inferCacheWriteUsage(usage, k.CacheWriteLifetime)
 	ctx, c := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer c()
 	a.record(ctx, k, u, r.Method, r.URL.Path, status, code, start, usage, id, attempt, "inference")

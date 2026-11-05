@@ -105,6 +105,58 @@ func TestDecimalTokenEstimates(t *testing.T) {
 	}
 }
 
+func TestCacheWriteLifetimeEstimates(t *testing.T) {
+	s := func(v string) *string { return &v }
+	p := modelPrice{Model: "gpt-6.1-sol", Input: s("2"), Output: s("10"), Cached: s("0.1"), Write30m: s("2.5"), Write12h: s("5"), OutputApplicable: true, LongPolicy: "none"}
+	for _, tc := range []struct {
+		name, details, total, reason string
+		missingRate                  bool
+	}{
+		{name: "missing_lifetime", reason: "cache_write_lifetime_missing"},
+		{name: "incomplete_lifetime", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":58494}`, reason: "cache_write_lifetime_missing"},
+		{name: "inconsistent_lifetime", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":58493,"ttl_12h_tokens":0}`, reason: "cache_write_lifetime_missing"},
+		{name: "30m", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":58494,"ttl_12h_tokens":0}`, total: "0.1464610000000000"},
+		{name: "12h", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":0,"ttl_12h_tokens":58494}`, total: "0.2926960000000000"},
+		{name: "mixed", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":30000,"ttl_12h_tokens":28494}`, total: "0.2176960000000000"},
+		{name: "missing_rate", details: `,"cache_write_tokens_details":{"ttl_30m_tokens":58494,"ttl_12h_tokens":0}`, reason: "cache_write_rate_missing", missingRate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Retention is not the write lifetime, even when the response says 24h.
+			u := textUsage(t, `{"model":"gpt-6.1-sol","prompt_cache_retention":"24h","usage":{"input_tokens":58497,"output_tokens":22,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":58494`+tc.details+`}}}`)
+			price := p
+			if tc.missingRate {
+				price.Write30m = nil
+			}
+			c := estimateTokens(price, true, u, "default")
+			if c.Output == nil || *c.Output != "0.0002200000000000" || c.Cached == nil || *c.Cached != "0" {
+				t.Fatal("known output and zero cache reads must remain priced", c)
+			}
+			if tc.reason != "" {
+				if c.Status != "partial" || c.Input != nil || c.Total != nil || c.Write != nil {
+					t.Fatal("unknown writes must not be guessed or charged at ordinary input rates", c)
+				}
+				reasons, _ := c.Snapshot["reasons"].([]string)
+				if len(reasons) != 1 || reasons[0] != tc.reason {
+					t.Fatal("wrong missing-cost reason", c.Snapshot)
+				}
+			} else if c.Status != "estimated" || c.Total == nil || *c.Total != tc.total {
+				t.Fatal("cache writes double counted or wrong lifetime rate", c)
+			}
+		})
+	}
+	// Missing write lifetime does not make an independently known cache read unknown.
+	u := textUsage(t, `{"usage":{"input_tokens":58497,"output_tokens":22,"input_tokens_details":{"cached_tokens":1000,"cache_write_tokens":57494}}}`)
+	c := estimateTokens(p, true, u, "default")
+	if c.Cached == nil || *c.Cached != "0.0001000000000000" || c.Total != nil {
+		t.Fatal("known cache read cost lost with unknown writes", c)
+	}
+	// Zero input needs no cache-details object to establish zero input cost.
+	c = estimateTokens(p, true, Usage{InputKnown: true, OutputKnown: true}, "default")
+	if c.Total == nil || *c.Total != "0.0000000000000000" {
+		t.Fatal("zero input incorrectly depends on cache detail presence", c)
+	}
+}
+
 func seedTestPrice(t *testing.T, a *App) {
 	t.Helper()
 	_, err := a.DB.Exec(context.Background(), `INSERT INTO model_pricing(platform,model,input_price,output_price,cached_input_price,long_context_policy,source_current,synced_at) VALUES('openai','test-model',2,8,0.5,'none',true,now()),('other','test-model',100,200,50,'none',true,now())`)

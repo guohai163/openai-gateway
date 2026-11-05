@@ -13,7 +13,8 @@ type Usage struct {
 	ErrorMessage, ErrorParam             string
 	Write30m, Write12h                   int64
 	WriteKnown                           bool
-	WriteInferred                        bool
+	WriteDetailsPresent                  bool
+	WriteSource                          string
 	Image                                bool
 	TextInput, ImageInput                int64
 	TextOutput, ImageOutput              int64
@@ -77,6 +78,7 @@ func usageFrom(v map[string]any) Usage {
 		if d, ok := us[key].(map[string]any); ok {
 			u.Cached, u.CachedKnown = tokenNumber(d["cached_tokens"])
 			u.CacheWrite, _ = tokenNumber(d["cache_write_tokens"])
+			_, u.WriteDetailsPresent = d["cache_write_tokens_details"]
 			if details, ok := d["cache_write_tokens_details"].(map[string]any); ok {
 				var known30m, known12h bool
 				u.Write30m, known30m = tokenNumber(details["ttl_30m_tokens"])

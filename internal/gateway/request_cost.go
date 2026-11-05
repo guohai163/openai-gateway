@@ -60,7 +60,14 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 	if u.CachePolicy != "" {
 		c.Snapshot["prompt_cache_policy"], c.Snapshot["prompt_cache_ttl"] = u.CachePolicy, u.CacheTTL
 	}
-	if u.WriteInferred { c.Snapshot["cache_write_lifetime_source"] = "gateway_policy" }
+	if u.WriteSource != "" {
+		c.Snapshot["cache_write_lifetime_source"] = u.WriteSource
+		if u.Write30m > 0 {
+			c.Snapshot["cache_write_ttl"] = "30m"
+		} else if u.Write12h > 0 {
+			c.Snapshot["cache_write_ttl"] = "12h"
+		}
+	}
 	var reasons []string
 	if !current {
 		reasons = append(reasons, "price_missing_or_stale")
@@ -100,18 +107,21 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 			}
 		}
 		if u.InputKnown {
-			switch {
-			case u.CacheWrite > 0 && !u.WriteKnown:
-				reasons = append(reasons, "cache_write_price_missing")
-			case !u.CachedKnown && u.Input > 0:
-				reasons = append(reasons, "cache_usage_missing")
-			default:
+			// Cache-read cost is independent of missing cache-write lifetime details.
+			if u.CachedKnown || u.Input == 0 {
 				if u.Cached == 0 {
 					zero := "0"
 					c.Cached = &zero
 				} else {
 					c.Cached = tokenCost(u.Cached, cached)
 				}
+			}
+			switch {
+			case u.CacheWrite > 0 && !u.WriteKnown:
+				reasons = append(reasons, "cache_write_lifetime_missing")
+			case !u.CachedKnown && u.Input > 0:
+				reasons = append(reasons, "cache_usage_missing")
+			default:
 				zero := "0"
 				c.Write = &zero
 				if u.CacheWrite > 0 {
@@ -124,7 +134,7 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 					}
 					c.Write = sumCost(cost30m, cost12h)
 					if c.Write == nil {
-						reasons = append(reasons, "cache_write_price_missing")
+						reasons = append(reasons, "cache_write_rate_missing")
 					}
 				}
 				c.Input = sumCost(sumCost(tokenCost(u.Input-u.Cached-u.CacheWrite, input), c.Cached), c.Write)

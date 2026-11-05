@@ -1626,6 +1626,10 @@ tbody tr:hover .actions-column {
   min-width: 195px;
   font-variant-numeric: tabular-nums;
 }
+.request-cost-cell details[open] {
+  position: relative;
+  z-index: 3;
+}
 .request-cost-cell summary {
   display: flex;
   align-items: center;
@@ -1660,6 +1664,7 @@ tbody tr:hover .actions-column {
   background: var(--subtle);
   border: 1px solid var(--border);
   border-radius: 10px;
+  box-shadow: var(--shadow);
   font-size: 12px;
   white-space: normal;
 }

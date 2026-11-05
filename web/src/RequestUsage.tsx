@@ -66,6 +66,19 @@ export function RequestTokens({ row, locale, t }: Props) {
 
 export function RequestCost({ row, locale, t }: Props) {
   const p = row.pricing_snapshot || {};
+  // Older snapshots used one reason for both absent rates and lifetime usage.
+  const reasons = (p.reasons || []).map((reason: string) => {
+    if (reason !== "cache_write_price_missing" || !(row.cache_write_tokens > 0))
+      return reason;
+    const lifetimeKnown =
+      p.write_30m_tokens != null &&
+      p.write_12h_tokens != null &&
+      Number(p.write_30m_tokens) + Number(p.write_12h_tokens) ===
+        Number(row.cache_write_tokens);
+    return lifetimeKnown
+      ? "cache_write_rate_missing"
+      : "cache_write_lifetime_missing";
+  });
   const rate = (value: unknown) =>
     value == null ? t("unknown") : `${money(value, locale)} / 1M`;
   const fmt = (value: unknown) =>
@@ -167,12 +180,18 @@ export function RequestCost({ row, locale, t }: Props) {
           )}
           {p.long_context && <small>{t("longContextApplied")}</small>}
           {p.prompt_cache_policy === "first_system" && p.prompt_cache_ttl && <small>{t("promptCacheEffectiveTTL")}: {p.prompt_cache_ttl}</small>}
+          {p.cache_write_lifetime_source === "api_default" && (
+            <small>{t("cacheWriteDefaultLifetime")}</small>
+          )}
+          {p.cache_write_lifetime_source === "request" && p.cache_write_ttl && (
+            <small>{t("cacheWriteRequestLifetime")}: {p.cache_write_ttl}</small>
+          )}
           {p.response_model && p.response_model !== row.model && (
             <small>
               {t("responseModel")}: {p.response_model}
             </small>
           )}
-          {(p.reasons || []).map((reason: string) => (
+          {reasons.map((reason: string) => (
             <small className="cost-note" key={reason}>
               {t(reason)}
             </small>
