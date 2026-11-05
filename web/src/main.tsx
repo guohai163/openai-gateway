@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { messages, resolveLanguage } from "./i18n.mjs";
+import { formatDateTime as date } from "./date-time.mjs";
 import { ModelMultiSelect } from "./ModelMultiSelect";
 import { KeyUsageDialog } from "./KeyUsageDialog";
 import { IPAllowlistField } from "./IPAllowlistField";
@@ -388,13 +389,6 @@ function App() {
     new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(
       Number(v || 0)
     );
-  const date = (v: any) =>
-    v
-      ? new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(v))
-      : "—";
   const languages = (
     <label className="language">
       <Globe size={15} />

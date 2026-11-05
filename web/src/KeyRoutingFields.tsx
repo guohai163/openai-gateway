@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatDateTime } from "./date-time.mjs";
 
 type Upstream = {
   id: string;
@@ -194,7 +195,7 @@ export function KeyRoutingFields({
                     primaryID}
                   <br />
                   {t("routingNextSwitch")}:{" "}
-                  {new Date(anchor + (slot + 1) * interval).toLocaleString()}
+                  {formatDateTime(anchor + (slot + 1) * interval)}
                 </p>
               )}
             </>

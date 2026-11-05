@@ -37,6 +37,7 @@ function hourLabel(value: string, locale: string) {
   return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   }).format(new Date(value));
 }
 function points(values: number[], width: number, height: number) {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatDateTime as date } from "./date-time.mjs";
 import {
   AlertCircle,
   Check,
@@ -84,13 +85,6 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
     );
   const money = (n: any) =>
     n === null || n === undefined ? "—" : "$" + number(n);
-  const date = (v: any) =>
-    v
-      ? new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(v))
-      : "—";
   function priceLines(
     row: Row,
     field: "input_price" | "output_price" | "cached_input_price",

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
+import { formatDateTime } from "./date-time.mjs";
 
 export type LogFilterValues = {
   model: string;
@@ -272,7 +273,7 @@ export function LogFilters({
               const raw = value[key];
               const display =
                 key === "start" || key === "end"
-                  ? new Date(raw).toLocaleString()
+                  ? formatDateTime(raw)
                   : items?.find((item) => item.id === raw)?.name ||
                     (
                       {
