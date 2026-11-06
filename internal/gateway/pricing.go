@@ -308,6 +308,7 @@ type bailianPriceItem struct {
 	Type      string `json:"type"`
 	Price     string `json:"price"`
 	PriceUnit string `json:"price_unit"`
+	TimeBand  string `json:"time_band"`
 }
 
 func (p *bailianPriceItem) UnmarshalJSON(raw []byte) error {
@@ -315,11 +316,12 @@ func (p *bailianPriceItem) UnmarshalJSON(raw []byte) error {
 		Type      string          `json:"type"`
 		Price     json.RawMessage `json:"price"`
 		PriceUnit string          `json:"price_unit"`
+		TimeBand  string          `json:"time_band"`
 	}
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return err
 	}
-	p.Type, p.PriceUnit = item.Type, item.PriceUnit
+	p.Type, p.PriceUnit, p.TimeBand = item.Type, item.PriceUnit, item.TimeBand
 	if len(item.Price) > 0 && item.Price[0] == '"' {
 		return json.Unmarshal(item.Price, &p.Price)
 	}
@@ -369,7 +371,7 @@ type bailianModelsResponse struct {
 	} `json:"output"`
 }
 
-var bailianRange = regexp.MustCompile(`(?i)^([0-9]+(?:\.[0-9]+)?)([km]?)<(?:input|tokens?)<=([0-9]+(?:\.[0-9]+)?)([km]?)$`)
+var bailianRange = regexp.MustCompile(`(?i)^(?:([0-9]+(?:\.[0-9]+)?)([km]?)<)?(?:input|tokens?|输入)<=([0-9]+(?:\.[0-9]+)?)([km]?)$`)
 var bailianNumber = regexp.MustCompile(`^[0-9]+(?:\.[0-9]{1,10})?$`)
 var bailianModelIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$`)
 
@@ -442,23 +444,39 @@ func parseBailianModelPrice(m bailianModel) (modelPrice, bool) {
 		} else {
 			normalized := strings.ReplaceAll(strings.Join(strings.Fields(r.RangeName), ""), "≤", "<=")
 			if parts := bailianRange.FindStringSubmatch(normalized); len(parts) == 5 {
-				start, startOK := bailianTokenCount(parts[1], parts[2])
+				start, startOK := int64(0), true
+				if parts[1] != "" {
+					start, startOK = bailianTokenCount(parts[1], parts[2])
+				}
 				end, endOK := bailianTokenCount(parts[3], parts[4])
 				parsed.start, parsed.end, parsed.valid = start, end, startOK && endOK && end > start
 			}
 		}
 		for _, item := range r.Prices {
+			if band := strings.ToLower(strings.TrimSpace(item.TimeBand)); band != "" && band != "standard" {
+				parsed.valid = false
+				continue
+			}
+			kind := strings.ToLower(strings.TrimSpace(item.Type))
+			switch kind {
+			case "input_token_batch", "output_token_batch", "input_token_batch_chat", "output_token_batch_chat",
+				"input_token_cache_creation_5m", "input_token_cache_read":
+				// These rates apply to Batch or explicit-cache API usage. They
+				// remain in SourcePrices and must not replace standard input,
+				// output or implicit-cache prices for ordinary requests.
+				continue
+			}
 			if !bailianTokenUnit(item.PriceUnit) {
 				parsed.valid = false
 				continue
 			}
 			var target **string
-			switch strings.ToLower(strings.TrimSpace(item.Type)) {
+			switch kind {
 			case "input_token", "input_tokens":
 				target = &input
 			case "output_token", "output_tokens":
 				target = &output
-			case "cached_input_token", "cached_input_tokens", "cache_read_input_token", "cache_read_tokens":
+			case "input_token_cache", "cached_input_token", "cached_input_tokens", "cache_read_input_token", "cache_read_tokens":
 				target = &cached
 			default:
 				parsed.valid = false

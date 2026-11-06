@@ -7,7 +7,7 @@ import (
 type Usage struct {
 	Input, Output, Cached, CacheWrite    int64
 	InputKnown, OutputKnown, CachedKnown bool
-	NonText                              bool
+	NonText, ExplicitCache               bool
 	Model, ServiceTier                   string
 	CachePolicy, CacheTTL                string
 	ErrorMessage, ErrorParam             string
@@ -54,6 +54,15 @@ func tokenNumber(v any) (int64, bool) {
 	return int64(f), true
 }
 
+// Bailian marks explicit cache reads and creation separately from its
+// automatically enabled implicit cache. Even zero creation tokens can accompany
+// an explicit-cache hit, so a non-null creation field is a mode marker.
+func explicitCacheDetails(details map[string]any) bool {
+	return details["cache_type"] == "ephemeral" ||
+		details["cache_creation_input_tokens"] != nil ||
+		details["cache_creation"] != nil
+}
+
 func usageFrom(v map[string]any) Usage {
 	u := Usage{}
 	u.Model, _ = v["model"].(string)
@@ -76,6 +85,7 @@ func usageFrom(v map[string]any) Usage {
 	}
 	for _, key := range []string{"input_tokens_details", "prompt_tokens_details"} {
 		if d, ok := us[key].(map[string]any); ok {
+			u.ExplicitCache = u.ExplicitCache || explicitCacheDetails(d)
 			u.Cached, u.CachedKnown = tokenNumber(d["cached_tokens"])
 			u.CacheWrite, _ = tokenNumber(d["cache_write_tokens"])
 			_, u.WriteDetailsPresent = d["cache_write_tokens_details"]
@@ -89,6 +99,18 @@ func usageFrom(v map[string]any) Usage {
 			for _, name := range []string{"audio_tokens", "image_tokens", "video_tokens"} {
 				if n, _ := tokenNumber(d[name]); n > 0 {
 					u.NonText = true
+				}
+			}
+		}
+	}
+	// Responses exposes per-call session-cache markers in x_details as well
+	// as top-level input token details. Do not sum these into top-level usage.
+	if details, ok := us["x_details"].([]any); ok {
+		for _, raw := range details {
+			item, _ := raw.(map[string]any)
+			for _, key := range []string{"input_tokens_details", "prompt_tokens_details"} {
+				if d, ok := item[key].(map[string]any); ok {
+					u.ExplicitCache = u.ExplicitCache || explicitCacheDetails(d)
 				}
 			}
 		}

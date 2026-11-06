@@ -7,9 +7,113 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+// Sanitized prices from the Beijing model-list API. The extra Batch and
+// explicit-cache rates describe different billing paths than ordinary calls.
+const bailianQwen38MaxPricingFixture = `{"model":"qwen3.8-max","inference_provider":"aliyun-bailian","prices":[{"range_name":"Default","prices":[{"type":"input_token","price":"12","price_unit":"每百万tokens","time_band":"standard"},{"type":"output_token","price":"36","price_unit":"每百万tokens","time_band":"standard"},{"type":"input_token_cache","price":"1.5","price_unit":"每百万tokens","time_band":"standard"},{"type":"input_token_batch","price":"6","price_unit":"每百万tokens","time_band":"standard"},{"type":"output_token_batch","price":"18","price_unit":"每百万tokens","time_band":"standard"},{"type":"input_token_cache_creation_5m","price":"15","price_unit":"每百万tokens","time_band":"standard"},{"type":"input_token_cache_read","price":"1","price_unit":"每百万tokens","time_band":"standard"},{"type":"input_token_batch_chat","price":"12","price_unit":"每百万tokens","time_band":"standard"},{"type":"output_token_batch_chat","price":"36","price_unit":"每百万tokens","time_band":"standard"}]}]}`
+
+func TestBailianQwen38MaxStandardPricingAndCost(t *testing.T) {
+	var model bailianModel
+	if err := json.Unmarshal([]byte(bailianQwen38MaxPricingFixture), &model); err != nil {
+		t.Fatal(err)
+	}
+	price, ok := parseBailianModelPrice(model)
+	if !ok || price.LongPolicy != "none" || price.Input == nil || *price.Input != "12" || price.Output == nil || *price.Output != "36" || price.Cached == nil || *price.Cached != "1.5" {
+		t.Fatalf("ordinary prices invalidated by separate billing items: policy=%s input=%v output=%v cached=%v", price.LongPolicy, price.Input, price.Output, price.Cached)
+	}
+	if !bytes.Contains(price.SourcePrices, []byte(`"input_token_cache_creation_5m"`)) || !bytes.Contains(price.SourcePrices, []byte(`"output_token_batch"`)) {
+		t.Fatal("separate billing items were removed from the raw price record")
+	}
+	cost := estimateTokens(price, true, Usage{Input: 85, Output: 36, InputKnown: true, OutputKnown: true, CachedKnown: true}, "")
+	if cost.Status != "estimated" || cost.Total == nil || *cost.Total != "0.0023160000000000" || cost.Snapshot["currency"] != "CNY" {
+		t.Fatalf("ordinary Bailian request cost unavailable or incorrect: %#v", cost)
+	}
+	cost = estimateTokens(price, true, Usage{Input: 85, Output: 36, Cached: 80, InputKnown: true, OutputKnown: true, CachedKnown: true}, "")
+	if cost.Total == nil || *cost.Total != "0.0014760000000000" {
+		t.Fatalf("ordinary cache hit used an explicit-cache or Batch rate: %#v", cost)
+	}
+}
+
+func TestBailianChineseContextRanges(t *testing.T) {
+	for _, tt := range []struct {
+		first, second string
+		threshold     int64
+	}{
+		{"输入<=256k", "256k<输入<=1m", 256000},
+		{"输入<=32k", "32k<输入<=256k", 32000},
+		{"输入<=128k", "128k<输入<=256k", 128000},
+		{"输入<=32k", "32k<输入<=128k", 32000},
+		{"输入<=32k", "32k<输入<=200k", 32000},
+		{" 输入 ≤ 32K ", "32K < 输入 ≤ 128K", 32000},
+	} {
+		t.Run(tt.first+"_"+tt.second, func(t *testing.T) {
+			model := bailianModel{Model: "chinese-context", Prices: []bailianPriceRange{
+				{RangeName: tt.first, Prices: []bailianPriceItem{{Type: "input_token", Price: "1", PriceUnit: "每百万tokens", TimeBand: "standard"}, {Type: "output_token", Price: "2", PriceUnit: "每百万tokens", TimeBand: "standard"}}},
+				{RangeName: tt.second, Prices: []bailianPriceItem{{Type: "input_token", Price: "4", PriceUnit: "每百万tokens", TimeBand: "standard"}, {Type: "output_token", Price: "8", PriceUnit: "每百万tokens", TimeBand: "standard"}}},
+			}}
+			price, ok := parseBailianModelPrice(model)
+			if !ok || price.LongPolicy != "tiered" || price.Threshold == nil || *price.Threshold != tt.threshold {
+				t.Fatalf("Chinese input tier was not recognized: policy=%s threshold=%v", price.LongPolicy, price.Threshold)
+			}
+			for _, input := range []int64{tt.threshold, tt.threshold + 1} {
+				cost := estimateTokens(price, true, Usage{Input: input, Output: 3, InputKnown: true, OutputKnown: true, CachedKnown: true}, "")
+				if cost.Status != "estimated" || cost.Snapshot["long_context"] != (input > tt.threshold) {
+					t.Fatalf("wrong price selected at the context boundary: %d %#v", input, cost)
+				}
+			}
+		})
+	}
+}
+
+func TestBailianStandardPricingRetainsUnknownGuards(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		apply func(*bailianModel)
+	}{
+		{"unknown-time-band", func(model *bailianModel) { model.Prices[0].Prices[0].TimeBand = "unknown-band" }},
+		{"unknown-type", func(model *bailianModel) {
+			model.Prices[0].Prices = append(model.Prices[0].Prices, bailianPriceItem{Type: "unknown_token_fee", Price: "1", PriceUnit: "每百万tokens", TimeBand: "standard"})
+		}},
+		{"different-thinking-price", func(model *bailianModel) {
+			model.Prices[0].Prices = append(model.Prices[0].Prices, bailianPriceItem{Type: "output_token_thinking", Price: "72", PriceUnit: "每百万tokens", TimeBand: "standard"})
+		}},
+		{"conflicting-output", func(model *bailianModel) {
+			model.Prices[0].Prices = append(model.Prices[0].Prices, bailianPriceItem{Type: "output_token", Price: "72", PriceUnit: "每百万tokens", TimeBand: "standard"})
+		}},
+		{"three-context-tiers", func(model *bailianModel) {
+			items := model.Prices[0].Prices
+			model.Prices = []bailianPriceRange{{RangeName: "输入<=32k", Prices: items}, {RangeName: "32k<输入<=128k", Prices: items}, {RangeName: "128k<输入<=256k", Prices: items}}
+		}},
+		{"batch-only", func(model *bailianModel) {
+			model.Prices[0].Prices = []bailianPriceItem{{Type: "input_token_batch", Price: "6", PriceUnit: "每百万tokens", TimeBand: "standard"}, {Type: "output_token_batch", Price: "18", PriceUnit: "每百万tokens", TimeBand: "standard"}}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var model bailianModel
+			if err := json.Unmarshal([]byte(bailianQwen38MaxPricingFixture), &model); err != nil {
+				t.Fatal(err)
+			}
+			tt.apply(&model)
+			price, ok := parseBailianModelPrice(model)
+			if !ok || price.LongPolicy != "unknown" {
+				t.Fatalf("unsupported billing conditions were accepted: policy=%s", price.LongPolicy)
+			}
+		})
+	}
+	// Verify time_band survives JSON decoding; otherwise unknown bands could
+	// silently be treated like older payloads that omit the field.
+	var model bailianModel
+	if err := json.Unmarshal([]byte(strings.Replace(bailianQwen38MaxPricingFixture, `"standard"`, `"unknown-band"`, 1)), &model); err != nil {
+		t.Fatal(err)
+	}
+	if price, ok := parseBailianModelPrice(model); !ok || price.LongPolicy != "unknown" || price.Input != nil {
+		t.Fatal("unknown time band was used as the standard input price")
+	}
+}
 
 func TestParseBailianPricing(t *testing.T) {
 	prices, err := parseBailianPricing([]bailianModel{

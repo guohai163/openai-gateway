@@ -178,6 +178,7 @@ export const messages = {
       "Public token rates at request time; excludes tools and other charges. Not an official invoice.",
     price_missing_or_stale: "No current matching price is available.",
     long_context_unknown: "Long-context pricing rules are unknown.",
+    unsupported_cache_mode: "Explicit-cache billing requires separate creation and read rates; its cost is not estimated yet.",
     unsupported_service_tier: "This service tier has no supported price.",
     non_text_usage: "Audio/image/video usage requires separate pricing.",
     cache_write_price_missing:
@@ -668,6 +669,7 @@ export const messages = {
       "按调用时公开 Token 单价估算，不含工具等其他费用，以官方账单为准。",
     price_missing_or_stale: "缺少当前有效的匹配单价。",
     long_context_unknown: "长上下文计价规则未知。",
+    unsupported_cache_mode: "显式缓存需按创建和命中分别计费，暂不估算此类费用。",
     unsupported_service_tier: "此服务档位的价格暂未支持。",
     non_text_usage: "音频、图像或视频用量需按单独单价计费。",
     cache_write_price_missing:

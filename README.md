@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.14.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.14.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.14.0`。
+最新版本：[v1.14.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.14.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.14.1`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -259,6 +259,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 - 页面分别显示官方已公布价格和是否已在本机上游模型列表中发现。模型没有价格不会阻止正常转发，也不会被当作免费模型。
 - 同步以事务更新，平台互不覆盖。网络失败、分页不完整、来源结构不再识别或出现相互冲突的价格时保留旧数据并显示错误；OpenAI 使用网页解析，百炼使用官方结构化 API。
 - 百炼完整原始报价保存在 `source_prices`，页面可展开查看所有档位和原始计价单位。当前费用估算支持明确的默认 Token 单价或两个连续输入区间；三档及以上、思考模式差异、按张/分钟等报价保留供查看，但不会按基础 Token 单价估算，普通用户仍受完整有效定价限制。缓存价仅在 API 明确返回时写入，不自行套用折扣；Batch、Flex、Fast 等价格也不会混入 Standard 估算。不会对私有 Key 执行收费或扣减。
+- 百炼普通调用分别使用 `input_token`、`output_token` 和隐式缓存 `input_token_cache`；同组的 Batch、显式缓存创建/读取报价保留展示，不会导致普通价格失效。支持 `输入<=256k`、`256k<输入<=1m` 等中文区间。显式缓存用量单独标记为暂不支持估算，避免误套隐式缓存单价。升级价格解析修复后请重新同步百炼价格；修复适用于后续请求，历史未知费用保持原始快照，不会按新价格自动重算。
 
 管理接口：`GET /admin/api/pricing?platform=bailian&q=模型ID&missing=true&limit=100&offset=0`；`POST /admin/api/pricing/sync?platform=bailian`。`platform` 支持 `openai`（默认）和 `bailian`。均需管理员会话，手动同步还需 CSRF Token；平台同步记录保存在 `model_pricing_sync` 表。升级自动执行 `014_bailian_pricing.sql`，为旧库增加 CNY 和原始报价字段；保留原数据库卷和 `MASTER_KEY`。
 

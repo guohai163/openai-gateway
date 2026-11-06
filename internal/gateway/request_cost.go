@@ -164,6 +164,25 @@ func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstima
 	return c
 }
 
+func estimatePlatformTokens(platform string, p modelPrice, current bool, usage Usage, tier string) costEstimate {
+	c := estimateTokens(p, current, usage, tier)
+	if usage.Image {
+		c = estimateImageTokens(p, current, usage, tier)
+	}
+	if platform == "bailian" && usage.ExplicitCache {
+		// The synchronized cached rate is for implicit cache reads. Explicit
+		// reads and five-minute creation have different prices, and must never
+		// inherit either that rate or OpenAI's cache-write lifetime rules.
+		c = costEstimate{Status: "unknown", Snapshot: c.Snapshot}
+		for _, name := range []string{"input_price", "output_price", "cached_input_price", "cache_write_30m_price", "cache_write_12h_price"} {
+			delete(c.Snapshot, name)
+		}
+		c.Snapshot["cache_mode"] = "explicit"
+		c.Snapshot["reasons"] = []string{"unsupported_cache_mode"}
+	}
+	return c
+}
+
 func estimateRequest(ctx context.Context, tx pgx.Tx, platform, model string, usage Usage, tier string) (costEstimate, error) {
 	var p modelPrice
 	var current bool
@@ -183,10 +202,7 @@ func estimateRequest(ctx context.Context, tx pgx.Tx, platform, model string, usa
 	if usage.ServiceTier != "" {
 		tier = usage.ServiceTier
 	}
-	c := estimateTokens(p, current, usage, tier)
-	if usage.Image {
-		c = estimateImageTokens(p, current, usage, tier)
-	}
+	c := estimatePlatformTokens(platform, p, current, usage, tier)
 	c.Snapshot["platform"], c.Snapshot["synced_at"], c.Snapshot["source_url"] = platform, syncedAt, sourceURL
 	return c, nil
 }
