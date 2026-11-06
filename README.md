@@ -6,13 +6,13 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.12.4](https://github.com/guohai163/openai-gateway/releases/tag/v1.12.4) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.12.4`。
+最新版本：[v1.13.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.13.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.13.0`。
 
-Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。固定上游 `https://api.openai.com`；客户端只接触网关私有 Key。
+Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
 ## 功能
 
-- 直接添加上游普通 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
+- 直接添加 OpenAI 或阿里云百炼 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
 - 按可用模型轮询上游 Key，明确拒绝时最多尝试 3 个不同 Key。
 - 多用户系统：管理员及普通用户；全员密码＋TOTP 登录，管理员创建账号并生成一次性展示的 14 位初始密码。
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销；普通用户最多 3 个，只能使用有效定价模型、查看自己的密钥和调用情况。
@@ -129,7 +129,7 @@ docker compose down
 
 ### 初始配置顺序
 
-1. 添加上游密钥，填写名称和普通 OpenAI API Key。系统仅使用该 Key 查询模型列表，不发送组织或项目头；成功后加入共享调度池。点击模型数量可以查看完整模型列表和原始响应。
+1. 添加上游密钥，填写名称、渠道（OpenAI 官方或阿里云百炼）和对应 API Key。OpenAI 使用官方 `/v1/models`；百炼默认使用北京公共 OpenAI 兼容推理地址，并通过百炼 `/api/v1/models` 分页同步百炼支持的模型，不发送组织或项目头；成功后加入共享调度池。点击模型数量可以查看完整模型列表和原始响应。
 2. 如需额度恢复探测，在该上游 Key 中填写可用且支持 Responses 的探测模型。留空不影响正常推理，但不会发起恢复探测。
 3. 颁发私有 Key，名称仅支持小写字母、数字和连字符（`-`），最多 120 个字符；IP 白名单默认按当前请求者 IPv4 `/24` 或 IPv6 `/64` 自动填写，可手动修改。从全部已同步上游 Key 的模型去重列表中搜索、多选，或选择全部模型。有效期仅支持 30、90、120 天，默认 30 天，从创建或续期时计算。新密钥统一以 `gk-ai-` 开头，管理员可在操作栏点击“显示密钥”再次查看或复制；客户端 `base_url` 使用 `https://你的域名/v1`。
 
@@ -204,7 +204,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 - `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
 - `GET /client_ip` 返回当前请求的 `client_ip` 和建议的 `default_cidr`（IPv4 `/24`、IPv6 `/64`）。新建私有 Key 时自动填入白名单，可手动修改；编辑已有 Key 保留原白名单。客户端 IP 沿用 `TRUSTED_PROXIES` 的可信代理解析，不信任任意转发头。
-- `GET, POST /upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 只需名称和密钥。
+- `GET, POST /upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 支持 `platform` 为 `openai`（默认）或 `bailian`，并需要填写对应渠道的 API Key。
 - `POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /upstream_keys/{id}/probe`。
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
 - 私有 Key 使用 `models` 数组设置模型权限；管理员的 `["*"]` 表示全部当前及未来可用模型，普通用户的 `["*"]` 仅表示全部当前及未来具有有效完整定价的模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。
@@ -252,10 +252,10 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 管理菜单中的“模型定价”页面提供 OpenAI 官方价格的手动同步。点击“同步官方价格”后，服务端从 [官方价格页的 Markdown](https://developers.openai.com/api/docs/pricing.md) 读取 **Standard 文本、向量和图像 Token**价格，无须提供 Admin Key，也不会发送推理请求。
 
-- PostgreSQL 的 `model_pricing` 表以 `(platform, model)` 为联合主键，同名模型在不同平台的价格独立。当前同步器只支持 `openai`。
+- PostgreSQL 的 `model_pricing` 表以 `(platform, model)` 为联合主键，同名模型在不同平台的价格独立。当前价格同步器只支持 `openai`；百炼仅同步模型目录，不套用 OpenAI 单价，普通用户仍受完整有效定价限制。百炼模型是否可调用取决于 API Key 权限及模型支持的协议。
 - 金额使用 `NUMERIC(24,10)`，单位为 USD / 百万 Token。图片模型在 `modality_prices` 中分别保存 `text` 和 `image` 的十进制单价，文本与图像费率互不替代，图片输出使用图像单价；非按张收费。分别保存输入、输出、缓存输入，以及长上下文输入、输出和缓存输入单价；向量模型没有输出计费时显示“不适用”。
 - `long_context_policy` 区分无公开分档、已知分档和规则未知；`long_context_threshold` 保存实际输入 Token 阈值，`long_context_surcharge` 表示长上下文输入或输出单价是否更高。**200K 不是通用加价阈值，KB 也不是计价单位**：若官方标注超过 272K 后加价，就保存并显示 272000 输入 Token；普通价和长上下文价在同一价格格显示，窄窗口无需横向滚动查找。
-- 上游 `/v1/models` 同步成功时自动建立尚未匹配价格的记录。价格按精确模型 ID 匹配，不用名称前缀推断快照模型的价格；缺失价格、当前来源未再匹配或上下文规则无法确认的记录标红，支持筛选查看。
+- 上游模型同步成功时自动建立尚未匹配价格的记录。OpenAI 使用 `/v1/models`；百炼使用 `/api/v1/models` 并自动翻页。价格按精确模型 ID 匹配，不用名称前缀推断快照模型的价格；缺失价格、当前来源未再匹配或上下文规则无法确认的记录标红，支持筛选查看。
 - 页面分别显示官方已公布价格和是否已在本机上游模型列表中发现。模型没有价格不会阻止正常转发，也不会被当作免费模型。
 - 同步以事务更新，平台互不覆盖。网络失败、页面结构不再识别或出现相互冲突的 Standard 价格时保留旧数据并显示错误；官方网页解析并非官方价格 API。
 - Batch、Flex、Fast、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；不会对私有 Key 执行收费或扣减。官方公布的 30 分钟及 12 小时缓存写入单价会一并同步保存。
@@ -399,7 +399,7 @@ docker compose exec -T postgres sh -c \
 
 组织、上游项目和官方费用历史表归档为 `archived_*`，不再提供管理入口或参与调度；旧 Admin Key 凭据字段移除。旧的组织管理、Admin Key 校验、官方费用与密钥发现接口已删除。
 
-升级前先备份数据库和原 `MASTER_KEY`，然后执行 `docker compose pull gateway && docker compose up -d gateway`。不需要删除数据卷。新建上游 Key 只需名称和普通 API Key。
+升级前先备份数据库和原 `MASTER_KEY`，然后执行 `docker compose pull gateway && docker compose up -d gateway`。不需要删除数据卷。新建上游 Key 选择渠道后填写对应 API Key。
 
 ## 备份与恢复
 

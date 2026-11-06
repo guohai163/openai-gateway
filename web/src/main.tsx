@@ -495,6 +495,7 @@ function App() {
   const columns: Record<string, string[]> = {
     upstream_keys: [
       "name",
+      "platform",
       "enabled",
       "month_cost",
       "models",
@@ -525,6 +526,12 @@ function App() {
       catch (error) { fail(error); }
       finally { setBusy(false); }
     }}><span aria-hidden="true" />{t(r.enabled ? "on" : "off")}</button>;
+    if (c === "platform")
+      return r.platform === "bailian"
+        ? t("bailian")
+        : r.platform === "openai"
+          ? t("openai")
+          : r.platform || "—";
     if (c === "ip" && page === "logs")
       return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
     if (c === "month_cost")
@@ -1187,6 +1194,18 @@ function App() {
                 )}
                 {page === "upstream_keys" && (
                   <>
+                    <label>
+                      {t("channel")}
+                      <select
+                        name="platform"
+                        defaultValue={modal.platform || "openai"}
+                        disabled={!!modal.id}
+                      >
+                        <option value="openai">{t("openai")}</option>
+                        <option value="bailian">{t("bailian")}</option>
+                      </select>
+                      <small>{t("channelHint")}</small>
+                    </label>
                     {!modal.id &&
                       field("key", "password", "upstreamHint", true)}
                     {field("probe_model", "text", "probeHint")}
@@ -1313,9 +1332,10 @@ function App() {
                     {number(catalog.catalog.data.length)} {t("modelCount")}
                   </p>
                   <div className="catalog-models">
-                    {catalog.catalog.data.map((m: Row) => (
-                      <code key={m.id}>{m.id}</code>
-                    ))}
+                    {catalog.catalog.data.map((m: Row) => {
+                      const id = m.id || m.model;
+                      return <code key={id}>{id}</code>;
+                    })}
                   </div>
                   <details className="catalog-response">
                     <summary>{t("rawModelCatalog")}</summary>

@@ -23,29 +23,9 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 	if e != nil {
 		return e
 	}
-	// Discover the key's own catalog without overriding its organization or project.
-	req, e := a.makeRequest(ctx, Upstream{Secret: u.Secret}, "GET", "/v1/models", nil)
+	items, catalog, e := a.fetchModelCatalog(ctx, u)
 	if e != nil {
 		return e
-	}
-	resp, e := a.Client.Do(req)
-	if e != nil {
-		return errors.New("model_sync_failed")
-	}
-	defer resp.Body.Close()
-	b, e := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if e != nil {
-		return e
-	}
-	if resp.StatusCode != 200 {
-		a.classify(ctx, u, resp.StatusCode, errorCode(b), resp.Header)
-		return errors.New("model_sync_failed")
-	}
-	var v struct {
-		Data []json.RawMessage `json:"data"`
-	}
-	if json.Unmarshal(b, &v) != nil || v.Data == nil {
-		return errors.New("invalid_model_catalog")
 	}
 	tx, e := a.DB.Begin(ctx)
 	if e != nil {
@@ -55,12 +35,19 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 	if _, e = tx.Exec(ctx, "DELETE FROM models WHERE upstream_key_id=$1", id); e != nil {
 		return e
 	}
-	for _, raw := range v.Data {
+	for _, raw := range items {
 		var m struct {
 			ID           string  `json:"id"`
+			Model        string  `json:"model"`
 			ShutdownDate *string `json:"shutdown_date"`
 		}
-		if json.Unmarshal(raw, &m) != nil || m.ID == "" {
+		if json.Unmarshal(raw, &m) != nil {
+			return errors.New("invalid_model_catalog")
+		}
+		if m.ID == "" {
+			m.ID = m.Model
+		}
+		if m.ID == "" {
 			return errors.New("invalid_model_catalog")
 		}
 		if m.ShutdownDate != nil && *m.ShutdownDate <= time.Now().UTC().Format("2006-01-02") {
@@ -70,7 +57,7 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 			return e
 		}
 	}
-	if _, e = tx.Exec(ctx, "UPDATE upstream_keys SET model_synced_at=now(),model_sync_error='',model_catalog=$2 WHERE id=$1", id, json.RawMessage(b)); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE upstream_keys SET model_synced_at=now(),model_sync_error='',model_catalog=$2 WHERE id=$1", id, json.RawMessage(catalog)); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model) SELECT k.platform,m.model FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.id=$1 ON CONFLICT(platform,model) DO NOTHING`, id); e != nil {

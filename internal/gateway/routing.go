@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,34 @@ type Upstream struct {
 const upstreamJoins = `FROM upstream_keys k `
 const selectUpstream = `SELECT k.id,k.secret,k.probe_model,k.platform ` + upstreamJoins
 const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
+
+// Bailian exposes OpenAI-compatible inference under compatible-mode/v1 while
+// its account-scoped model discovery endpoint lives under /api/v1. The
+// generic DashScope endpoint works for API keys from the default Beijing
+// region; tests can continue to override Config.UpstreamURL with a local
+// server in the same way as OpenAI requests.
+const bailianBaseURL = "https://dashscope.aliyuncs.com"
+
+func (a *App) upstreamBaseURL(platform string) string {
+	base := strings.TrimRight(a.Config.UpstreamURL, "/")
+	if platform == "bailian" && base == "https://api.openai.com" {
+		return bailianBaseURL
+	}
+	return base
+}
+
+func upstreamRequestPath(platform, path string) string {
+	if platform != "bailian" {
+		return path
+	}
+	if path == "/v1/models" || strings.HasPrefix(path, "/v1/models?") {
+		return "/api/v1/models" + strings.TrimPrefix(path, "/v1/models")
+	}
+	if strings.HasPrefix(path, "/v1/") {
+		return "/compatible-mode" + path
+	}
+	return path
+}
 
 func (a *App) candidates(ctx context.Context, model, pin string) ([]Upstream, error) {
 	return a.keyCandidates(ctx, model, pin, GatewayKey{})
@@ -45,7 +74,7 @@ func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayK
 	if ids == nil {
 		ids = []string{}
 	}
-	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND (cardinality($3::text[])=0 OR k.id=ANY($3::text[])) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) ORDER BY k.id`, model, pin, ids)
+	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND (cardinality($3::text[])=0 OR k.id=ANY($3::text[])) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) AND ($4::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.platform=k.platform AND p.model=$1)) ORDER BY k.id`, model, pin, ids, key.PricedOnly)
 	if e != nil {
 		return nil, e
 	}
@@ -86,7 +115,9 @@ func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayK
 }
 func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, body []byte) (*http.Request, error) {
 	// 优化：避免将 []byte 强制转换为 string 导致的内存拷贝（减少大请求的 GC 压力）
-	req, e := http.NewRequestWithContext(ctx, method, a.Config.UpstreamURL+path, bytes.NewReader(body))
+	base := a.upstreamBaseURL(u.Platform)
+	path = upstreamRequestPath(u.Platform, path)
+	req, e := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(body))
 	if e != nil {
 		return nil, e
 	}
@@ -104,9 +135,9 @@ func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, 
 
 type upstreamError struct {
 	Error struct {
-		Code  string `json:"code"`
-		Type  string `json:"type"`
-		Param string `json:"param"`
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+		Param   string `json:"param"`
 		Message string `json:"message"`
 	} `json:"error"`
 }
@@ -117,7 +148,16 @@ func errorCode(b []byte) string {
 	if v.Error.Code != "" {
 		return v.Error.Code
 	}
-	return v.Error.Type
+	if v.Error.Type != "" {
+		return v.Error.Type
+	}
+	// Bailian's native model catalog API reports errors at the top level,
+	// unlike the nested OpenAI error envelope.
+	var top struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(b, &top)
+	return top.Code
 }
 func retryAfter(s string) time.Duration {
 	if n, e := strconv.ParseFloat(s, 64); e == nil && n >= 0 {
@@ -133,6 +173,20 @@ func retryAfter(s string) time.Duration {
 	return 30 * time.Second
 }
 func (a *App) classify(ctx context.Context, u Upstream, status int, code string, h http.Header) bool {
+	// Normalize the native error names returned by Bailian's /api/v1 catalog
+	// and compatible endpoints to the gateway's shared state transitions.
+	if u.Platform == "bailian" {
+		switch strings.ToLower(code) {
+		case "invalidapikey", "invalid_api_key":
+			code = "invalid_api_key"
+		case "throttling.ratequota", "throttling.allocationquota", "limit_requests", "resourceexhausted":
+			code = "rate_limit_exceeded"
+		case "modelnotfound":
+			code = "model_not_found"
+		case "arrearage", "accountoverdue":
+			code = "insufficient_quota"
+		}
+	}
 	switch code {
 	case "credit_balance_exhausted", "organization_spend_limit_exceeded", "organization_usage_limit_exceeded", "project_spend_limit_exceeded", "insufficient_quota":
 		// Without organization ownership, only the key that received the error is blocked.

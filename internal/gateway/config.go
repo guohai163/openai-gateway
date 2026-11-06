@@ -16,7 +16,7 @@ type Config struct {
 	MasterKey                                       []byte
 	SecureCookies                                   bool
 	TrustedProxies                                  []netip.Prefix
-	UpstreamURL                                     string // Only injected by tests; production is fixed to api.openai.com.
+	UpstreamURL                                     string // Tests override this origin; production uses fixed origins per platform.
 	RequestTimeout                                  time.Duration
 	ReportTimezone                                  string
 	S3                                              S3Config

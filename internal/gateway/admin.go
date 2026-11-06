@@ -16,19 +16,20 @@ import (
 )
 
 type resourceInput struct {
-	Name           string    `json:"name"`
-	Key            string    `json:"key"`
-	ProbeModel     *string   `json:"probe_model"`
-	Enabled        *bool     `json:"enabled"`
-	Models         *[]string `json:"models"`
-	CIDRs          *[]string `json:"cidrs"`
-	ExpiresInDays  *int      `json:"expires_in_days"`
-	StoreInput     *bool     `json:"store_input"`
-	StoreOutput    *bool     `json:"store_output"`
-	RoutingMode    *string   `json:"routing_mode"`
-	UpstreamKeyIDs *[]string `json:"upstream_key_ids"`
-	PromptCacheMode *string  `json:"prompt_cache_mode"`
-	PromptCacheTTL  *string  `json:"prompt_cache_ttl"`
+	Name            string    `json:"name"`
+	Key             string    `json:"key"`
+	Platform        string    `json:"platform"`
+	ProbeModel      *string   `json:"probe_model"`
+	Enabled         *bool     `json:"enabled"`
+	Models          *[]string `json:"models"`
+	CIDRs           *[]string `json:"cidrs"`
+	ExpiresInDays   *int      `json:"expires_in_days"`
+	StoreInput      *bool     `json:"store_input"`
+	StoreOutput     *bool     `json:"store_output"`
+	RoutingMode     *string   `json:"routing_mode"`
+	UpstreamKeyIDs  *[]string `json:"upstream_key_ids"`
+	PromptCacheMode *string   `json:"prompt_cache_mode"`
+	PromptCacheTTL  *string   `json:"prompt_cache_ttl"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -104,7 +105,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		for _, p := range a.Config.TrustedProxies {
 			proxies = append(proxies, p.String())
 		}
-		settings := map[string]any{"upstream": "https://api.openai.com", "trusted_proxies": proxies, "secure_cookies": a.Config.SecureCookies, "model_sync_minutes": 10, "probe_initial_minutes": 5, "probe_max_minutes": 60, "request_timeout_seconds": a.Config.RequestTimeout.Seconds(), "report_timezone": a.reportLocation().String()}
+		settings := map[string]any{"upstream": "OpenAI: https://api.openai.com; Bailian: https://dashscope.aliyuncs.com", "trusted_proxies": proxies, "secure_cookies": a.Config.SecureCookies, "model_sync_minutes": 10, "probe_initial_minutes": 5, "probe_max_minutes": 60, "request_timeout_seconds": a.Config.RequestTimeout.Seconds(), "report_timezone": a.reportLocation().String()}
 		if a.Storage != nil {
 			settings["storage"] = map[string]any{"endpoint": a.Config.S3.Endpoint, "bucket": a.Config.S3.Bucket, "region": a.Config.S3.Region}
 		}
@@ -289,6 +290,14 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	switch resource {
 	case "upstream_keys":
 		if create {
+			platform := strings.TrimSpace(in.Platform)
+			if platform == "" {
+				platform = "openai"
+			}
+			if platform != "openai" && platform != "bailian" {
+				writeError(w, 400, "unsupported_upstream_platform")
+				return
+			}
 			if !strings.HasPrefix(in.Key, "sk-") || strings.HasPrefix(in.Key, "sk-admin-") {
 				writeError(w, 400, "upstream_key_required")
 				return
@@ -298,8 +307,23 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 500, "encryption_failed")
 				return
 			}
-			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,enabled,probe_model) VALUES($1,$2,$3,$4,$5,$6)", id, name, secret, hash(in.Key), enabled(in.Enabled), optionalString(in.ProbeModel))
+			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model) VALUES($1,$2,$3,$4,$5,$6,$7)", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel))
 		} else {
+			if in.Platform != "" {
+				var platform string
+				if err := a.DB.QueryRow(ctx, "SELECT platform FROM upstream_keys WHERE id=$1", id).Scan(&platform); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						writeError(w, 404, "not_found")
+					} else {
+						adminDBError(w, err)
+					}
+					return
+				}
+				if in.Platform != platform {
+					writeError(w, 400, "upstream_platform_immutable")
+					return
+				}
+			}
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":

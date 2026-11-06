@@ -242,7 +242,7 @@ func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
 	if ids == nil {
 		ids = []string{}
 	}
-	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND (cardinality($2::text[])=0 OR k.id=ANY($2::text[])) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform='openai')) ORDER BY m.model`, k.PricedOnly, ids)
+	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND (cardinality($2::text[])=0 OR k.id=ANY($2::text[])) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform=k.platform)) ORDER BY m.model`, k.PricedOnly, ids)
 	if e != nil {
 		writeError(w, 503, "database_unavailable")
 		return
