@@ -145,6 +145,10 @@ func TestBailianUpstreamLifecycle(t *testing.T) {
 	if err := a.DB.QueryRow(ctx, "SELECT platform FROM upstream_keys WHERE id=$1", created.ID).Scan(&platform); err != nil || platform != "bailian" {
 		t.Fatal("channel not saved", platform, err)
 	}
+	var currency string
+	if err := a.DB.QueryRow(ctx, `SELECT currency FROM model_pricing WHERE platform='bailian' AND model='qwen-plus'`).Scan(&currency); err != nil || currency != "CNY" {
+		t.Fatal("discovered Bailian model has wrong currency", currency, err)
+	}
 	if _, err := a.DB.Exec(ctx, "UPDATE gateway_keys SET models='{qwen-plus}' WHERE id='g1'"); err != nil {
 		t.Fatal(err)
 	}

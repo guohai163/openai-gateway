@@ -6,11 +6,12 @@ type Props = {
   t: (key: string) => string;
 };
 
-function money(value: unknown, locale: string) {
+function money(value: unknown, locale: string, currency = "USD") {
   if (value == null) return "—";
+  const code = /^[A-Z]{3}$/.test(currency) ? currency : "USD";
   return new Intl.NumberFormat(locale, {
     style: "currency",
-    currency: "USD",
+    currency: code,
     minimumFractionDigits: 2,
     maximumFractionDigits: 16,
   }).format(Number(value));
@@ -79,10 +80,14 @@ export function RequestCost({ row, locale, t }: Props) {
       ? "cache_write_rate_missing"
       : "cache_write_lifetime_missing";
   });
+  const currency =
+    typeof p.currency === "string" && /^[A-Z]{3}$/.test(p.currency)
+      ? p.currency
+      : "USD";
   const rate = (value: unknown) =>
-    value == null ? t("unknown") : `${money(value, locale)} / 1M`;
+    value == null ? t("unknown") : `${money(value, locale, currency)} / 1M`;
   const fmt = (value: unknown) =>
-    value == null ? t("unknown") : money(value, locale);
+    value == null ? t("unknown") : money(value, locale, currency);
   return (
     <div className="request-cost-cell">
       <details>
@@ -212,7 +217,7 @@ export function RequestCost({ row, locale, t }: Props) {
               : row.pricing_status === "estimated"
                 ? "estimatedCost"
                 : "costUnavailable",
-        )}
+        ).replace("{currency}", currency)}
       </small>
     </div>
   );

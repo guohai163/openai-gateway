@@ -178,7 +178,16 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	var b []byte
-	e := a.DB.QueryRow(r.Context(), `SELECT json_build_object(
+	e := a.DB.QueryRow(r.Context(), `WITH recent AS (
+ SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs
+ WHERE kind='inference' AND created_at>=date_trunc('hour',now())-interval '23 hours'
+), hourly_costs AS (
+ SELECT date_trunc('hour',created_at) AS hour,currency,sum(total_cost)::text AS cost FROM recent GROUP BY hour,currency
+), model_costs AS (
+ SELECT model,currency,sum(total_cost)::text AS cost FROM request_logs
+ CROSS JOIN LATERAL (SELECT coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency) c
+ WHERE kind='inference' AND created_at>=now()-interval '24 hours' GROUP BY model,currency
+) SELECT json_build_object(
  'upstream_keys',(SELECT count(*) FROM upstream_keys),'gateway_keys',(SELECT count(*) FROM gateway_keys WHERE deleted_at IS NULL),
  'available_keys',(SELECT count(*) `+upstreamJoins+`WHERE `+available+`),
  'requests_today',(SELECT count(DISTINCT id) FROM request_logs WHERE created_at>=date_trunc('day',now()) AND kind='inference'),
@@ -189,15 +198,21 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
    SELECT h AS hour,count(l.id)::bigint AS requests,
      coalesce(sum(l.input_tokens),0)::bigint AS input_tokens,
      coalesce(sum(l.output_tokens),0)::bigint AS output_tokens,
-     sum(l.total_cost)::text AS total_cost
+     CASE WHEN count(DISTINCT l.currency)=1 THEN min(l.currency) END AS currency,
+     CASE WHEN count(DISTINCT l.currency)<=1 THEN sum(l.total_cost)::text END AS total_cost,
+     (SELECT coalesce(json_object_agg(c.currency,c.cost) FILTER(WHERE c.cost IS NOT NULL),'{}'::json) FROM hourly_costs c WHERE c.hour=h) AS totals_by_currency
    FROM generate_series(date_trunc('hour',now())-interval '23 hours',date_trunc('hour',now()),interval '1 hour') h
-   LEFT JOIN request_logs l ON l.created_at>=h AND l.created_at<h+interval '1 hour' AND l.kind='inference'
+   LEFT JOIN recent l ON l.created_at>=h AND l.created_at<h+interval '1 hour'
    GROUP BY h
  ) bucket),'[]'::json),
  'models',coalesce((SELECT json_agg(row_to_json(model_row) ORDER BY model_row.requests DESC,model_row.model) FROM (
    SELECT model,count(*)::bigint AS requests,coalesce(sum(input_tokens),0)::bigint AS input_tokens,
-     coalesce(sum(output_tokens),0)::bigint AS output_tokens,sum(total_cost)::text AS total_cost
-   FROM request_logs WHERE kind='inference' AND created_at>=now()-interval '24 hours' GROUP BY model
+     coalesce(sum(output_tokens),0)::bigint AS output_tokens,
+     CASE WHEN count(DISTINCT currency)=1 THEN min(currency) END AS currency,
+     CASE WHEN count(DISTINCT currency)<=1 THEN sum(total_cost)::text END AS total_cost,
+     (SELECT coalesce(json_object_agg(c.currency,c.cost) FILTER(WHERE c.cost IS NOT NULL),'{}'::json) FROM model_costs c WHERE c.model=l.model) AS totals_by_currency
+   FROM request_logs l CROSS JOIN LATERAL (SELECT coalesce(nullif(l.pricing_snapshot->>'currency',''),'USD') AS currency) cur
+   WHERE kind='inference' AND created_at>=now()-interval '24 hours' GROUP BY model
  ) model_row),'[]'::json))`).Scan(&b)
 	if e != nil {
 		adminDBError(w, e)

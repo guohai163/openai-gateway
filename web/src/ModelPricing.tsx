@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatDateTime as date } from "./date-time.mjs";
+import { PlatformIdentity, PlatformSelector } from "./PlatformIdentity";
 import {
   AlertCircle,
   Check,
@@ -32,7 +33,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
     [syncing, setSyncing] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  const platform = "openai",
+  const [platform, setPlatform] = useState("openai"),
     limit = 100;
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +61,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [search, missing, offset, revision]);
+  }, [platform, search, missing, offset, revision]);
   async function sync() {
     setSyncing(true);
     setError("");
@@ -83,8 +84,18 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
     new Intl.NumberFormat(locale, { maximumFractionDigits: 10 }).format(
       Number(n),
     );
-  const money = (n: any) =>
-    n === null || n === undefined ? "—" : "$" + number(n);
+  const money = (n: any, currency = result.data?.[0]?.currency || "USD") => {
+    if (n === null || n === undefined) return "—";
+    const code =
+      typeof currency === "string" && /^[A-Z]{3}$/.test(currency)
+        ? currency
+        : "USD";
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: 10,
+    }).format(Number(n));
+  };
   function priceLines(
     row: Row,
     field: "input_price" | "output_price" | "cached_input_price",
@@ -102,7 +113,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
               <strong>
                 {field === "output_price" && !modalities[name].output_applicable
                   ? t("notApplicable")
-                  : money(modalities[name][field])}
+                  : money(modalities[name][field], row.currency)}
               </strong>
             </div>
           ))}
@@ -123,7 +134,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
           <strong>
             {field === "output_price" && !row.output_applicable
               ? t("notApplicable")
-              : money(row[field])}
+              : money(row[field], row.currency)}
           </strong>
         </div>
         {tiered && (
@@ -134,7 +145,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                 number(row.long_context_threshold),
               )}
             </small>
-            <strong>{money(row["long_" + field])}</strong>
+            <strong>{money(row["long_" + field], row.currency)}</strong>
           </div>
         )}
       </div>
@@ -145,9 +156,23 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
     <div className="pricing-page">
       <section className="panel pricing-summary">
         <div>
-          <h2>{t("pricingScope")}</h2>
-          <p>{t("pricingDescription")}</p>
-          <small>{t("pricingThresholdHint")}</small>
+          <h2>
+            {t(platform === "bailian" ? "bailianPricingScope" : "pricingScope")}
+          </h2>
+          <p>
+            {t(
+              platform === "bailian"
+                ? "bailianPricingDescription"
+                : "pricingDescription",
+            )}
+          </p>
+          <small>
+            {t(
+              platform === "bailian"
+                ? "bailianPricingThresholdHint"
+                : "pricingThresholdHint",
+            )}
+          </small>
         </div>
         <div className="heading-actions">
           <button
@@ -179,11 +204,15 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
           {t("missingPrices")}: {result.missing_count}
         </span>
         <a
-          href="https://developers.openai.com/api/docs/pricing"
+          href={
+            platform === "bailian"
+              ? "https://help.aliyun.com/zh/model-studio/model-pricing"
+              : "https://developers.openai.com/api/docs/pricing"
+          }
           target="_blank"
           rel="noreferrer"
         >
-          {t("pricingSource")}
+          {t(platform === "bailian" ? "bailianPricingSource" : "pricingSource")}
           <ExternalLink size={13} />
         </a>
       </div>
@@ -201,16 +230,21 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
       )}
       <section className="panel data-panel">
         <div className="table-toolbar">
-          <label className="pricing-platform">
-            {t("platform")}
-            <select
-              aria-label={t("platform")}
-              value={platform}
-              onChange={() => {}}
-            >
-              <option value="openai">OpenAI</option>
-            </select>
-          </label>
+          <PlatformSelector
+            label={t("platform")}
+            value={platform}
+            disabled={syncing}
+            onChange={(value) => {
+              setPlatform(value);
+              setResult({ data: [], total: 0, missing_count: 0, sync: null });
+              setOffset(0);
+              setSearch("");
+              setMissing(false);
+              setError("");
+              setNotice("");
+            }}
+            t={t}
+          />
           <label className="search">
             <Search size={16} />
             <input
@@ -273,9 +307,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                       </span>
                     </div>
                     <div className="pricing-model-meta">
-                      <span>
-                        {row.platform === "openai" ? "OpenAI" : row.platform}
-                      </span>
+                      <PlatformIdentity platform={row.platform} t={t} />
                       <span>
                         {t("inModelCatalog")}:{" "}
                         {t(row.in_catalog ? "yes" : "no")}
@@ -302,6 +334,41 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                     <small className="pricing-model-date">
                       {t("syncedPriceAt")}: {date(row.synced_at)}
                     </small>
+                    {row.platform === "bailian" &&
+                      Array.isArray(row.source_prices) &&
+                      row.source_prices.length > 0 && (
+                        <details className="pricing-source-rates">
+                          <summary>{t("allOfficialRates")}</summary>
+                          <div>
+                            {row.source_prices.map(
+                              (range: Row, index: number) => (
+                                <section key={index}>
+                                  <strong>
+                                    {range.range_name || t("standardRate")}
+                                  </strong>
+                                  {(range.prices || []).map(
+                                    (price: Row, priceIndex: number) => (
+                                      <p key={priceIndex}>
+                                        <span>
+                                          {String(
+                                            price.price_name ||
+                                              price.type ||
+                                              "",
+                                          )}
+                                        </span>
+                                        <b>
+                                          {String(price.price ?? "—")}{" "}
+                                          {String(price.price_unit ?? "")}
+                                        </b>
+                                      </p>
+                                    ),
+                                  )}
+                                </section>
+                              ),
+                            )}
+                          </div>
+                        </details>
+                      )}
                   </td>
                   <td data-label={t("inputPrice")}>
                     {priceLines(row, "input_price")}
@@ -316,21 +383,27 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
                         <summary>{t("cacheWrites")}</summary>
                         <small>
                           {t("cacheWrite30m")}:{" "}
-                          {money(row.cache_write_30m_price)}
+                          {money(row.cache_write_30m_price, row.currency)}
                         </small>
                         <small>
                           {t("cacheWrite12h")}:{" "}
-                          {money(row.cache_write_12h_price)}
+                          {money(row.cache_write_12h_price, row.currency)}
                         </small>
                         {row.long_context_policy === "tiered" && (
                           <>
                             <small>
                               {t("longContextRate")} · {t("cacheWrite30m")}:{" "}
-                              {money(row.long_cache_write_30m_price)}
+                              {money(
+                                row.long_cache_write_30m_price,
+                                row.currency,
+                              )}
                             </small>
                             <small>
                               {t("longContextRate")} · {t("cacheWrite12h")}:{" "}
-                              {money(row.long_cache_write_12h_price)}
+                              {money(
+                                row.long_cache_write_12h_price,
+                                row.currency,
+                              )}
                             </small>
                           </>
                         )}

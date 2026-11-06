@@ -83,21 +83,27 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
 	}
 	var data []byte
 	err := a.DB.QueryRow(r.Context(), `WITH filtered AS (
- SELECT * FROM request_logs WHERE kind='inference' AND created_at >= $1 AND created_at < $2`+filter+`
+ SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs WHERE kind='inference' AND created_at >= $1 AND created_at < $2`+filter+`
 ), grouped AS (
- SELECT platform,model,count(DISTINCT coalesce(request_uuid::text,id))::bigint AS requests,
+ SELECT platform,model,currency,count(DISTINCT coalesce(request_uuid::text,id))::bigint AS requests,
  count(*) FILTER(WHERE status<400)::bigint AS successful_requests,
  coalesce(sum(input_tokens),0)::bigint AS input_tokens,coalesce(sum(output_tokens),0)::bigint AS output_tokens,
  sum(input_cost)::text AS input_cost,sum(output_cost)::text AS output_cost,sum(total_cost)::text AS total_cost,
  count(*) FILTER(WHERE total_cost IS NULL AND usage_accounting<>'duplicate')::bigint AS unknown_cost_requests
- FROM filtered GROUP BY platform,model
+ FROM filtered GROUP BY platform,model,currency
+), currency_totals AS (
+ SELECT currency,sum(total_cost)::text AS total_cost FROM filtered GROUP BY currency
 )
 SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
  'timezone',$3::text,
  'summary',(SELECT json_build_object('requests',count(DISTINCT coalesce(request_uuid::text,id)),'input_tokens',coalesce(sum(input_tokens),0),'output_tokens',coalesce(sum(output_tokens),0),
- 'input_cost',sum(input_cost)::text,'output_cost',sum(output_cost)::text,'total_cost',sum(total_cost)::text,
+ 'currency',CASE WHEN count(DISTINCT currency)=1 THEN min(currency) END,
+ 'input_cost',CASE WHEN count(DISTINCT currency)<=1 THEN sum(input_cost)::text END,
+ 'output_cost',CASE WHEN count(DISTINCT currency)<=1 THEN sum(output_cost)::text END,
+ 'total_cost',CASE WHEN count(DISTINCT currency)<=1 THEN sum(total_cost)::text END,
+ 'totals_by_currency',(SELECT coalesce(json_object_agg(currency,total_cost) FILTER(WHERE total_cost IS NOT NULL),'{}'::json) FROM currency_totals),
  'unknown_cost_requests',count(*) FILTER(WHERE total_cost IS NULL AND usage_accounting<>'duplicate')) FROM filtered),
- 'models',coalesce((SELECT json_agg(row_to_json(g) ORDER BY g.requests DESC,g.platform,g.model) FROM grouped g),'[]'::json))`, args...).Scan(&data)
+ 'models',coalesce((SELECT json_agg(row_to_json(g) ORDER BY g.requests DESC,g.platform,g.model,g.currency) FROM grouped g),'[]'::json))`, args...).Scan(&data)
 	if err != nil {
 		adminDBError(w, err)
 		return
@@ -121,11 +127,23 @@ func (a *App) keyMonthlyScope(resource string, limited bool) string {
 		}
 		base = `SELECT ` + fields + ` FROM gateway_keys WHERE ` + filter
 	}
-	return `WITH selected AS (` + base + ` ORDER BY created_at DESC LIMIT $1 OFFSET $2), usage AS (
- SELECT ` + column + ` AS key_id,count(DISTINCT coalesce(request_uuid::text,id)) AS requests,sum(total_cost)::text AS cost,
+	return `WITH selected AS (` + base + ` ORDER BY created_at DESC LIMIT $1 OFFSET $2), filtered AS (
+ SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs
+ WHERE kind='inference' AND created_at >= $3 AND created_at < $4 AND ` + column + ` IN (SELECT id FROM selected)
+), usage AS (
+ SELECT ` + column + ` AS key_id,count(DISTINCT coalesce(request_uuid::text,id)) AS requests,
+ CASE WHEN count(DISTINCT currency)=1 THEN min(currency) END AS currency,
+ CASE WHEN count(DISTINCT currency)<=1 THEN sum(total_cost)::text END AS cost,
  count(*) FILTER(WHERE total_cost IS NULL AND usage_accounting<>'duplicate') AS unknown
- FROM request_logs WHERE kind='inference' AND created_at >= $3 AND created_at < $4 AND ` + column + ` IN (SELECT id FROM selected) GROUP BY ` + column + `
+ FROM filtered GROUP BY ` + column + `
+), currency_totals AS (
+ SELECT ` + column + ` AS key_id,currency,sum(total_cost)::text AS cost FROM filtered GROUP BY ` + column + `,currency
+), totals AS (
+ SELECT key_id,json_object_agg(currency,cost) FILTER(WHERE cost IS NOT NULL) AS totals_by_currency FROM currency_totals GROUP BY key_id
 ) SELECT coalesce(json_agg(t),'[]'::json) FROM (
- SELECT s.*,coalesce(u.requests,0) AS month_requests,u.cost AS month_cost,coalesce(u.unknown,0) AS month_unknown FROM selected s LEFT JOIN usage u ON u.key_id=s.id ORDER BY s.created_at DESC
+ SELECT s.*,coalesce(u.requests,0) AS month_requests,u.cost AS month_cost,u.currency AS month_currency,
+ coalesce(totals.totals_by_currency,'{}'::json) AS month_totals_by_currency,
+ coalesce(u.unknown,0) AS month_unknown FROM selected s LEFT JOIN usage u ON u.key_id=s.id
+ LEFT JOIN totals ON totals.key_id=s.id ORDER BY s.created_at DESC
 ) t`
 }

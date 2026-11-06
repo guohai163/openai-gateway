@@ -9,14 +9,27 @@ type Props = {
   resourceId?: string;
   compact?: boolean;
 };
-export function usd(value: unknown, locale: string) {
+export function money(value: unknown, locale: string, currency = "USD") {
   return value == null
     ? "—"
     : new Intl.NumberFormat(locale, {
         style: "currency",
-        currency: "USD",
+        currency: /^[A-Z]{3}$/.test(currency) ? currency : "USD",
         maximumFractionDigits: 8,
       }).format(Number(value));
+}
+export function usd(value: unknown, locale: string) {
+  return money(value, locale, "USD");
+}
+export function formatTotals(
+  totals: Record<string, unknown> | null | undefined,
+  locale: string,
+) {
+  return Object.entries(totals || {})
+    .filter(([, value]) => value != null)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, value]) => money(value, locale, currency))
+    .join(" · ");
 }
 export function SpendingDetails({
   api,
@@ -66,12 +79,19 @@ export function SpendingDetails({
     void load();
   }, [path]);
   const summary = data?.summary;
+  const summaryCurrencies =
+    Object.keys(summary?.totals_by_currency || {})
+      .sort()
+      .join(" / ") ||
+    summary?.currency ||
+    "USD";
   const summaryCost =
-    summary?.requests === 0
-      ? usd(0, locale)
+    formatTotals(summary?.totals_by_currency, locale) ||
+    (summary?.requests === 0
+      ? money(0, locale, summary?.currency || "USD")
       : summary?.total_cost == null
         ? t("unknown")
-        : usd(summary.total_cost, locale);
+        : money(summary.total_cost, locale, summary?.currency || "USD"));
   return (
     <section className={compact ? "spending-detail" : "panel monthly-spending"}>
       {!compact && (
@@ -84,7 +104,7 @@ export function SpendingDetails({
             <small>
               {data?.timezone} · {from} — {to}
               {summary?.unknown_cost_requests > 0
-                ? ` · ${t("partialEstimate")}`
+                ? ` · ${t("partialEstimate").replace("{currency}", summaryCurrencies)}`
                 : ""}
             </small>
           </div>
@@ -170,7 +190,8 @@ export function SpendingDetails({
             {t("report_timezone")}: {data?.timezone}
           </small>
           <p className="spending-totals">
-            {t("totalRequests")}: {n(summary?.requests)} · {t("estimatedCost")}:{" "}
+            {t("totalRequests")}: {n(summary?.requests)} ·{" "}
+            {t("estimatedCost").replace("{currency}", summaryCurrencies)}:{" "}
             {summaryCost}
             {summary?.unknown_cost_requests > 0 && (
               <span className="spend-partial">
@@ -203,7 +224,7 @@ export function SpendingDetails({
               </thead>
               <tbody>
                 {(data?.models || []).map((row: any) => (
-                  <tr key={row.platform + ":" + row.model}>
+                  <tr key={row.platform + ":" + row.model + ":" + row.currency}>
                     <td>{row.platform}</td>
                     <td>
                       <code>{row.model || t("unknown")}</code>
@@ -211,10 +232,14 @@ export function SpendingDetails({
                     <td>{n(row.requests)}</td>
                     <td>{n(row.input_tokens)}</td>
                     <td>{n(row.output_tokens)}</td>
-                    <td>{usd(row.input_cost, locale)}</td>
-                    <td>{usd(row.output_cost, locale)}</td>
                     <td>
-                      {usd(row.total_cost, locale)}
+                      {money(row.input_cost, locale, row.currency || "USD")}
+                    </td>
+                    <td>
+                      {money(row.output_cost, locale, row.currency || "USD")}
+                    </td>
+                    <td>
+                      {money(row.total_cost, locale, row.currency || "USD")}
                       {row.unknown_cost_requests > 0 && (
                         <small className="spend-partial">
                           {t("unknownCostCount").replace(

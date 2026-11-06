@@ -48,8 +48,15 @@ func sumCost(a, b *string) *string {
 }
 
 func estimateTokens(p modelPrice, current bool, u Usage, tier string) costEstimate {
+	currency, unit := p.Currency, p.PriceUnit
+	if currency == "" {
+		currency = "USD"
+	}
+	if unit == "" {
+		unit = "per_1m_tokens"
+	}
 	c := costEstimate{Status: "unknown", Snapshot: map[string]any{
-		"currency": "USD", "unit": "per_1m_tokens", "model": p.Model,
+		"currency": currency, "unit": unit, "model": p.Model,
 		"response_model": u.Model, "service_tier": tier, "long_context": false,
 		"long_context_policy": p.LongPolicy, "long_context_threshold": p.Threshold,
 	}}
@@ -163,7 +170,10 @@ func estimateRequest(ctx context.Context, tx pgx.Tx, platform, model string, usa
 	var syncedAt *time.Time
 	var sourceURL string
 	p.Model = model
-	err := tx.QueryRow(ctx, `SELECT input_price::text,output_price::text,cached_input_price::text,output_applicable,long_context_policy,long_context_threshold,long_input_price::text,long_output_price::text,long_cached_input_price::text,source_current,synced_at,cache_write_30m_price::text,cache_write_12h_price::text,long_cache_write_30m_price::text,long_cache_write_12h_price::text,source_url,modality_prices FROM model_pricing WHERE platform=$1 AND model=$2`, platform, model).Scan(&p.Input, &p.Output, &p.Cached, &p.OutputApplicable, &p.LongPolicy, &p.Threshold, &p.LongInput, &p.LongOutput, &p.LongCached, &current, &syncedAt, &p.Write30m, &p.Write12h, &p.LongWrite30m, &p.LongWrite12h, &sourceURL, &p.ModalityPrices)
+	if platform == "bailian" {
+		p.Currency = "CNY"
+	}
+	err := tx.QueryRow(ctx, `SELECT currency,price_unit,input_price::text,output_price::text,cached_input_price::text,output_applicable,long_context_policy,long_context_threshold,long_input_price::text,long_output_price::text,long_cached_input_price::text,source_current,synced_at,cache_write_30m_price::text,cache_write_12h_price::text,long_cache_write_30m_price::text,long_cache_write_12h_price::text,source_url,modality_prices FROM model_pricing WHERE platform=$1 AND model=$2`, platform, model).Scan(&p.Currency, &p.PriceUnit, &p.Input, &p.Output, &p.Cached, &p.OutputApplicable, &p.LongPolicy, &p.Threshold, &p.LongInput, &p.LongOutput, &p.LongCached, &current, &syncedAt, &p.Write30m, &p.Write12h, &p.LongWrite30m, &p.LongWrite12h, &sourceURL, &p.ModalityPrices)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return costEstimate{}, err
 	}

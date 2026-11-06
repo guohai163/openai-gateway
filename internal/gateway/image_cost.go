@@ -3,8 +3,15 @@ package gateway
 // Only direct Images API usage is eligible here. Responses/chat multimodal
 // usage continues to require its own attributable per-modality accounting.
 func estimateImageTokens(p modelPrice, current bool, u Usage, tier string) costEstimate {
+	currency, unit := p.Currency, p.PriceUnit
+	if currency == "" {
+		currency = "USD"
+	}
+	if unit == "" {
+		unit = "per_1m_tokens"
+	}
 	c := costEstimate{Status: "unknown", Snapshot: map[string]any{
-		"currency": "USD", "unit": "per_1m_tokens", "model": p.Model, "response_model": u.Model, "service_tier": tier,
+		"currency": currency, "unit": unit, "model": p.Model, "response_model": u.Model, "service_tier": tier,
 		"image_api": true, "cache_applicable": !imageCacheNotApplicable(p.Model), "modality_prices": p.ModalityPrices,
 		"modality_usage": map[string]any{"text_input_tokens": u.TextInput, "image_input_tokens": u.ImageInput, "text_output_tokens": u.TextOutput, "image_output_tokens": u.ImageOutput, "input_known": u.ImageInputKnown, "output_known": u.ImageOutputKnown},
 	}}

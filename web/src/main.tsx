@@ -37,6 +37,7 @@ import {
   themeStorageKey,
 } from "./theme.mjs";
 import { ModelPricing } from "./ModelPricing";
+import { PlatformIdentity, PlatformSelector } from "./PlatformIdentity";
 import { RequestTokens, RequestCost } from "./RequestUsage";
 import { ClientIPDetails } from "./ClientIPDetails";
 import { ArchiveDetails } from "./ArchiveDetails";
@@ -47,7 +48,7 @@ import {
   type LogFilterValues,
   type LogFilterOptions,
 } from "./LogFilters";
-import { SpendingDetails, usd } from "./SpendingDetails";
+import { SpendingDetails, formatTotals, money } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
@@ -527,11 +528,7 @@ function App() {
       finally { setBusy(false); }
     }}><span aria-hidden="true" />{t(r.enabled ? "on" : "off")}</button>;
     if (c === "platform")
-      return r.platform === "bailian"
-        ? t("bailian")
-        : r.platform === "openai"
-          ? t("openai")
-          : r.platform || "—";
+      return <PlatformIdentity platform={r.platform} t={t} />;
     if (c === "ip" && page === "logs")
       return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
     if (c === "month_cost")
@@ -544,14 +541,24 @@ function App() {
         >
           <strong>
             {Number(r.month_requests) === 0
-              ? usd(0, locale)
-              : r.month_cost == null
-                ? t("unknown")
-                : usd(r.month_cost, locale)}
+              ? money(0, locale, r.month_currency || "USD")
+              : Object.keys(r.month_totals_by_currency || {}).length
+                ? formatTotals(r.month_totals_by_currency, locale)
+                : r.month_cost == null
+                  ? t("unknown")
+                  : money(r.month_cost, locale, r.month_currency || "USD")}
           </strong>
           <small>
             {t("currentCalendarMonth")}
-            {r.month_unknown > 0 ? " · " + t("partialEstimate") : ""}
+            {r.month_unknown > 0
+              ? " · " +
+                t("partialEstimate").replace(
+                  "{currency}",
+                  r.month_currency ||
+                    Object.keys(r.month_totals_by_currency || {}).join(" / ") ||
+                    "USD",
+                )
+              : ""}
           </small>
           <span>{t(expandedKey === r.id ? "lessDetails" : "moreDetails")}</span>
         </button>
@@ -1194,18 +1201,17 @@ function App() {
                 )}
                 {page === "upstream_keys" && (
                   <>
-                    <label>
-                      {t("channel")}
-                      <select
+                    <div className="platform-field">
+                      <PlatformSelector
+                        key={modal.id || "new"}
                         name="platform"
                         defaultValue={modal.platform || "openai"}
                         disabled={!!modal.id}
-                      >
-                        <option value="openai">{t("openai")}</option>
-                        <option value="bailian">{t("bailian")}</option>
-                      </select>
+                        label={t("channel")}
+                        t={t}
+                      />
                       <small>{t("channelHint")}</small>
-                    </label>
+                    </div>
                     {!modal.id &&
                       field("key", "password", "upstreamHint", true)}
                     {field("probe_model", "text", "probeHint")}

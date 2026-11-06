@@ -1,4 +1,5 @@
 import { Activity, ArrowDown, ArrowUp, Coins, Info } from "lucide-react";
+import { formatTotals, money } from "./SpendingDetails";
 
 type Hour = {
   hour: string;
@@ -6,6 +7,8 @@ type Hour = {
   input_tokens: number;
   output_tokens: number;
   total_cost: string | null;
+  currency?: string | null;
+  totals_by_currency?: Record<string, string | null>;
 };
 type ModelRow = {
   model: string;
@@ -13,6 +16,8 @@ type ModelRow = {
   input_tokens: number;
   output_tokens: number;
   total_cost: string | null;
+  currency?: string | null;
+  totals_by_currency?: Record<string, string | null>;
 };
 type Props = {
   hourly: Hour[];
@@ -23,15 +28,6 @@ type Props = {
 
 function number(value: number, locale: string) {
   return new Intl.NumberFormat(locale).format(value || 0);
-}
-function money(value: string | number | null | undefined, locale: string) {
-  if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  }).format(Number(value));
 }
 function hourLabel(value: string, locale: string) {
   return new Intl.DateTimeFormat(locale, {
@@ -160,7 +156,7 @@ function TrendCard({
 }
 
 export function OverviewAnalytics({ hourly, models, locale, t }: Props) {
-  const hours = hourly.length
+  const hours: Hour[] = hourly.length
     ? hourly
     : Array.from({ length: 24 }, (_, index) => ({
         hour: new Date(Date.now() - (23 - index) * 3600000).toISOString(),
@@ -171,12 +167,36 @@ export function OverviewAnalytics({ hourly, models, locale, t }: Props) {
       }));
   const labels = hours.map((row) => hourLabel(row.hour, locale));
   const requestValues = hours.map((row) => Number(row.requests || 0));
-  const costValues = hours.map((row) => Number(row.total_cost || 0));
   const requestTotal = requestValues.reduce((sum, value) => sum + value, 0);
-  const knownCosts = hours
-    .filter((row) => row.total_cost !== null)
-    .reduce((sum, row) => sum + Number(row.total_cost), 0);
-  const costKnown = hours.some((row) => row.total_cost !== null);
+  const hourlyTotals = hours.map(
+    (row) =>
+      row.totals_by_currency ||
+      (row.total_cost == null
+        ? {}
+        : { [row.currency || "USD"]: row.total_cost }),
+  );
+  const currencies = Array.from(
+    new Set(
+      hourlyTotals.flatMap((totals) =>
+        Object.entries(totals)
+          .filter(([, value]) => value != null)
+          .map(([currency]) => currency),
+      ),
+    ),
+  ).sort();
+  const costSeries = (currencies.length ? currencies : ["USD"]).map(
+    (currency) => {
+      const values = hourlyTotals.map((totals) =>
+        Number(totals[currency] || 0),
+      );
+      return {
+        currency,
+        values,
+        known: currencies.includes(currency),
+        total: values.reduce((sum, value) => sum + value, 0),
+      };
+    },
+  );
   return (
     <div className="overview-analytics">
       <div className="trend-grid">
@@ -191,17 +211,24 @@ export function OverviewAnalytics({ hourly, models, locale, t }: Props) {
           icon={<Activity size={18} />}
           t={t}
         />
-        <TrendCard
-          chartId="cost"
-          title={t("hourlyCost")}
-          summary={costKnown ? money(knownCosts, locale) : t("unknown")}
-          values={costValues}
-          labels={labels}
-          color="#9971f8"
-          formatter={(value) => money(value, locale)}
-          icon={<Coins size={18} />}
-          t={t}
-        />
+        {costSeries.map((series) => (
+          <TrendCard
+            key={series.currency}
+            chartId={"cost-" + series.currency}
+            title={t("hourlyCost") + " · " + series.currency}
+            summary={
+              series.known
+                ? money(series.total, locale, series.currency)
+                : t("unknown")
+            }
+            values={series.values}
+            labels={labels}
+            color="#9971f8"
+            formatter={(value) => money(value, locale, series.currency)}
+            icon={<Coins size={18} />}
+            t={t}
+          />
+        ))}
       </div>
       <section className="panel model-activity-panel">
         <div className="panel-heading">
@@ -244,10 +271,14 @@ export function OverviewAnalytics({ hourly, models, locale, t }: Props) {
                     </td>
                     <td
                       className={
-                        row.total_cost === null ? "muted" : "cost-total"
+                        row.total_cost === null &&
+                        !Object.keys(row.totals_by_currency || {}).length
+                          ? "muted"
+                          : "cost-total"
                       }
                     >
-                      {money(row.total_cost, locale)}
+                      {formatTotals(row.totals_by_currency, locale) ||
+                        money(row.total_cost, locale, row.currency || "USD")}
                     </td>
                   </tr>
                 ))}

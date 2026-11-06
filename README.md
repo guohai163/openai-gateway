@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.13.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.13.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.13.0`。
+最新版本：[v1.14.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.14.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.14.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -250,17 +250,17 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 ## 模型定价
 
-管理菜单中的“模型定价”页面提供 OpenAI 官方价格的手动同步。点击“同步官方价格”后，服务端从 [官方价格页的 Markdown](https://developers.openai.com/api/docs/pricing.md) 读取 **Standard 文本、向量和图像 Token**价格，无须提供 Admin Key，也不会发送推理请求。
+管理菜单中的“模型定价”页面可选择 OpenAI 或阿里云百炼，并点击“同步官方价格”随时更新。OpenAI 从 [官方价格页的 Markdown](https://developers.openai.com/api/docs/pricing.md) 读取 **Standard 文本、向量和图像 Token**价格，无须提供 Admin Key。百炼使用官方[查询模型列表 API](https://help.aliyun.com/zh/model-studio/list-models) `GET /api/v1/models`，后端使用已保存、启用且未失效的百炼上游 API Key 分页获取 `output.models[].prices`；不会发送推理请求，密钥不会返回浏览器。
 
-- PostgreSQL 的 `model_pricing` 表以 `(platform, model)` 为联合主键，同名模型在不同平台的价格独立。当前价格同步器只支持 `openai`；百炼仅同步模型目录，不套用 OpenAI 单价，普通用户仍受完整有效定价限制。百炼模型是否可调用取决于 API Key 权限及模型支持的协议。
-- 金额使用 `NUMERIC(24,10)`，单位为 USD / 百万 Token。图片模型在 `modality_prices` 中分别保存 `text` 和 `image` 的十进制单价，文本与图像费率互不替代，图片输出使用图像单价；非按张收费。分别保存输入、输出、缓存输入，以及长上下文输入、输出和缓存输入单价；向量模型没有输出计费时显示“不适用”。
+- PostgreSQL 的 `model_pricing` 表以 `(platform, model)` 为联合主键，同名模型在不同平台的价格独立。普通用户可选择具有完整有效定价的 OpenAI 或百炼模型，实际路由仍按上游平台匹配价格。百炼模型是否可调用取决于 API Key 权限及模型支持的协议。
+- 金额使用 `NUMERIC(24,10)`。OpenAI 为 USD / 百万 Token；当前百炼接入限定北京公共入口，按该地区 CNY / 百万 Token 原价保存，不隐含换汇。调用快照保留币种；月消费、模型统计和费用趋势按币种分别汇总，人民币和美元不会相加。图片模型在 `modality_prices` 中分别保存 `text` 和 `image` 的十进制单价，文本与图像费率互不替代，图片输出使用图像单价；非按张收费。分别保存输入、输出、缓存输入，以及长上下文输入、输出和缓存输入单价；向量模型没有输出计费时显示“不适用”。
 - `long_context_policy` 区分无公开分档、已知分档和规则未知；`long_context_threshold` 保存实际输入 Token 阈值，`long_context_surcharge` 表示长上下文输入或输出单价是否更高。**200K 不是通用加价阈值，KB 也不是计价单位**：若官方标注超过 272K 后加价，就保存并显示 272000 输入 Token；普通价和长上下文价在同一价格格显示，窄窗口无需横向滚动查找。
 - 上游模型同步成功时自动建立尚未匹配价格的记录。OpenAI 使用 `/v1/models`；百炼使用 `/api/v1/models` 并自动翻页。价格按精确模型 ID 匹配，不用名称前缀推断快照模型的价格；缺失价格、当前来源未再匹配或上下文规则无法确认的记录标红，支持筛选查看。
 - 页面分别显示官方已公布价格和是否已在本机上游模型列表中发现。模型没有价格不会阻止正常转发，也不会被当作免费模型。
-- 同步以事务更新，平台互不覆盖。网络失败、页面结构不再识别或出现相互冲突的 Standard 价格时保留旧数据并显示错误；官方网页解析并非官方价格 API。
-- Batch、Flex、Fast、音频和按分钟/张收费的数据不会混入此文本单价表。不支持自动解析的模型显示待确认；不会对私有 Key 执行收费或扣减。官方公布的 30 分钟及 12 小时缓存写入单价会一并同步保存。
+- 同步以事务更新，平台互不覆盖。网络失败、分页不完整、来源结构不再识别或出现相互冲突的价格时保留旧数据并显示错误；OpenAI 使用网页解析，百炼使用官方结构化 API。
+- 百炼完整原始报价保存在 `source_prices`，页面可展开查看所有档位和原始计价单位。当前费用估算支持明确的默认 Token 单价或两个连续输入区间；三档及以上、思考模式差异、按张/分钟等报价保留供查看，但不会按基础 Token 单价估算，普通用户仍受完整有效定价限制。缓存价仅在 API 明确返回时写入，不自行套用折扣；Batch、Flex、Fast 等价格也不会混入 Standard 估算。不会对私有 Key 执行收费或扣减。
 
-管理接口：`GET /admin/api/pricing?platform=openai&q=模型ID&missing=true&limit=100&offset=0`；`POST /admin/api/pricing/sync?platform=openai`。均需管理员会话，手动同步还需 CSRF Token；平台同步记录保存在 `model_pricing_sync` 表。
+管理接口：`GET /admin/api/pricing?platform=bailian&q=模型ID&missing=true&limit=100&offset=0`；`POST /admin/api/pricing/sync?platform=bailian`。`platform` 支持 `openai`（默认）和 `bailian`。均需管理员会话，手动同步还需 CSRF Token；平台同步记录保存在 `model_pricing_sync` 表。升级自动执行 `014_bailian_pricing.sql`，为旧库增加 CNY 和原始报价字段；保留原数据库卷和 `MASTER_KEY`。
 
 本次迁移 `007_model_pricing.sql` 自动创建定价表并为已有模型建立待定价记录；网关项目管理接口和菜单已移除，旧项目资料归档为 `archived_gateway_projects`，上游请求完全使用密钥自身范围。历史迁移文件仍保留，保证从早期版本升级可重放迁移。升级保持原数据卷和 `MASTER_KEY`，无须重新导入密钥。
 

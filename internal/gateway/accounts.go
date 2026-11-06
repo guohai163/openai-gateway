@@ -73,7 +73,7 @@ const pricedModels = `SELECT platform,model FROM (` + pricingRows + `) priced WH
 
 func (a *App) pricedModel(ctx context.Context, model string) bool {
 	var ok bool
-	_ = a.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE platform='openai' AND model=$1)`, model).Scan(&ok)
+	_ = a.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+pricedModels+`) p JOIN upstream_keys k ON k.platform=p.platform JOIN models m ON m.upstream_key_id=k.id AND m.model=p.model WHERE p.model=$1)`, model).Scan(&ok)
 	return ok
 }
 func (a *App) accountRoutes(w http.ResponseWriter, r *http.Request, parts []string) {

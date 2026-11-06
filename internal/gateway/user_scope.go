@@ -33,7 +33,7 @@ func (a *App) userList(w http.ResponseWriter, r *http.Request, resource string, 
 	args := []any{actor(r).ID, limit, offset}
 	switch resource {
 	case "models":
-		query = `SELECT DISTINCT m.model FROM models m WHERE EXISTS(SELECT 1 FROM (` + pricedModels + `) p WHERE p.platform='openai' AND p.model=m.model) ORDER BY model LIMIT $1 OFFSET $2`
+		query = `SELECT DISTINCT m.model FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE EXISTS(SELECT 1 FROM (` + pricedModels + `) p WHERE p.platform=k.platform AND p.model=m.model) ORDER BY model LIMIT $1 OFFSET $2`
 		args = []any{limit, offset}
 	case "gateway_keys":
 		query = a.keyMonthlyScope("gateway_keys", true)

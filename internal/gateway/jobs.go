@@ -60,7 +60,7 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 	if _, e = tx.Exec(ctx, "UPDATE upstream_keys SET model_synced_at=now(),model_sync_error='',model_catalog=$2 WHERE id=$1", id, json.RawMessage(catalog)); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model) SELECT k.platform,m.model FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.id=$1 ON CONFLICT(platform,model) DO NOTHING`, id); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,currency) SELECT k.platform,m.model,CASE WHEN k.platform='bailian' THEN 'CNY' ELSE 'USD' END FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.id=$1 ON CONFLICT(platform,model) DO NOTHING`, id); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

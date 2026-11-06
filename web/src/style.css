@@ -1823,14 +1823,79 @@ tbody tr:hover .actions-column {
   color: var(--muted);
   margin-left: auto;
 }
-.pricing-platform {
-  flex-direction: row;
+.platform-identity {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
+  white-space: nowrap;
 }
-.pricing-platform select {
-  width: auto;
-  min-width: 110px;
+.platform-identity img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.platform-selector {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.platform-selector legend {
+  padding: 0;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.platform-selector-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.platform-selector-option {
+  position: relative;
+  cursor: pointer;
+}
+.platform-selector-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+}
+.platform-selector-card {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+}
+.platform-selector-option input:checked + .platform-selector-card {
+  background: var(--selected);
+  border-color: var(--text);
+  color: var(--text);
+}
+.platform-selector-option input:focus-visible + .platform-selector-card {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.platform-selector-option input:disabled + .platform-selector-card {
+  opacity: .6;
+  cursor: not-allowed;
+}
+.platform-field > small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.table-toolbar .platform-selector {
+  flex-shrink: 0;
 }
 .pricing-missing-filter {
   flex-direction: row;
@@ -1887,6 +1952,30 @@ tbody tr:hover .actions-column {
   font-size: 10px;
   color: var(--faint);
   margin-top: 8px;
+}
+.pricing-source-rates {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pricing-source-rates summary {
+  cursor: pointer;
+}
+.pricing-source-rates section {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.pricing-source-rates p {
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.pricing-source-rates b {
+  font-weight: 500;
 }
 .price-rate-stack {
   display: grid;
