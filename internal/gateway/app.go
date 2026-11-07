@@ -106,6 +106,9 @@ func (a *App) migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if e = repairSavedBailianPricing(ctx, tx); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 func (a *App) Handler(ui fs.FS) http.Handler {
