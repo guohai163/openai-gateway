@@ -91,7 +91,7 @@ func (a *App) listRequestLogs(w http.ResponseWriter, r *http.Request, limit, off
 	columns := `l.*,g.name AS gateway_name,g.user_id AS owner_id,u.email AS owner_email,k.name AS upstream_name,a.input_path,a.output_path,a.input_status,a.output_status`
 	joins := ` LEFT JOIN users u ON u.id=g.user_id LEFT JOIN upstream_keys k ON k.id=l.upstream_key_id LEFT JOIN request_archives a ON a.request_uuid=l.request_uuid`
 	if scoped {
-		columns = `l.id,l.request_uuid,l.gateway_key_id,g.name AS gateway_name,g.user_id AS owner_id,l.model,l.method,l.endpoint,l.ip,l.status,l.error_code,l.duration_ms,l.input_tokens,l.output_tokens,l.cached_tokens,l.response_id,l.attempt,l.created_at,l.kind,l.platform,l.usage_known,l.cached_tokens_known,l.cache_write_tokens,l.usage_accounting,l.pricing_status,l.pricing_snapshot,l.input_cost,l.output_cost,l.cached_input_cost,l.total_cost,l.cache_write_cost`
+		columns = `l.id,l.request_uuid,l.gateway_key_id,g.name AS gateway_name,g.user_id AS owner_id,l.model,l.method,l.endpoint,l.ip,l.user_agent,l.status,l.error_code,l.duration_ms,l.input_tokens,l.output_tokens,l.cached_tokens,l.response_id,l.attempt,l.created_at,l.kind,l.platform,l.usage_known,l.cached_tokens_known,l.cache_write_tokens,l.usage_accounting,l.pricing_status,l.pricing_snapshot,l.input_cost,l.output_cost,l.cached_input_cost,l.total_cost,l.cache_write_cost`
 		joins = ""
 	}
 	scope := "true"

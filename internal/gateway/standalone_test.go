@@ -160,6 +160,10 @@ func testExistingDatabaseMigration(t *testing.T, baseline int) {
 	if e = a.DB.QueryRow(ctx, "SELECT count(*) FROM request_logs WHERE id='old-log'").Scan(&n); e != nil || n != 1 {
 		t.Fatal("request log lost", e)
 	}
+	var userAgent string
+	if e = a.DB.QueryRow(ctx, "SELECT user_agent FROM request_logs WHERE id='old-log'").Scan(&userAgent); e != nil || userAgent != "" {
+		t.Fatal("historical user agent must be empty", e, userAgent)
+	}
 	if e = a.DB.QueryRow(ctx, "SELECT count(*) FROM models WHERE upstream_key_id='old-key'").Scan(&n); e != nil || n != 1 {
 		t.Fatal("model list lost", e)
 	}

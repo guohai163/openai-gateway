@@ -8,6 +8,7 @@ const allColumns = [
   "request_uuid",
   "archive_status",
   "ip",
+  "user_agent",
   "duration_ms",
   "gateway_name",
   "upstream_name",

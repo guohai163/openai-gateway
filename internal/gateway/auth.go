@@ -18,6 +18,7 @@ const keyContext authContext = 0
 type GatewayKey struct {
 	ID                      string
 	Name, RequestUUID       string
+	UserAgent               string
 	StoreInput, StoreOutput bool
 	PricedOnly              bool
 	Models                  []string

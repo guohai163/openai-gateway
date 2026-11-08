@@ -531,6 +531,8 @@ function App() {
       return <PlatformIdentity platform={r.platform} t={t} />;
     if (c === "ip" && page === "logs")
       return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
+    if (c === "user_agent")
+      return <span className="request-user-agent" title={v}>{v || "—"}</span>;
     if (c === "month_cost")
       return (
         <button

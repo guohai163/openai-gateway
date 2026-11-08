@@ -455,6 +455,7 @@ REPORT_TIMEZONE=Asia/Shanghai
 - 私有 Key 的“JSON 存储配置”（新建/编辑也可设置）分别控制 `store_input`、`store_output`，默认都关闭。配置 S3 **不会自动启用任何私钥的正文存储**。在这里开启后，请求正文会发送到你配置的存储桶。
 - 路径为 `私钥name/YYYY-MM/请求UUID-in.json`、`私钥name/YYYY-MM/请求UUID-out.json`。年月按请求开始时间及 `REPORT_TIMEZONE` 计算，重命名私钥后，历史文件保留旧路径；旧版名称中不适合作为单一路径段的字符会替换为连字符。
 - `X-Gateway-Request-ID` 响应头、调用记录 `request_uuid` 和 S3 对象文件名一致。每条新的调用记录 `id` 也使用 UUID；多个上游重试记录共用一个 `request_uuid`，归档保留客户端输入及最终响应。
+- 调用记录的“显示列”可勾选“UA（User-Agent）”，查看客户端请求携带的 User-Agent，悬停可查看完整内容。管理员及普通用户均可查看其有权限访问的日志；历史记录或未携带 User-Agent 的请求显示“—”。
 - 普通有效 JSON 保留原始正文。SSE 输出保存为 JSON 包装：`{"format":"sse","data":"原始 SSE 文本","complete":true,"status":200,"request_uuid":"..."}`；中断时 `complete=false`，不会改变向客户端传输的 SSE 字节。无 JSON 正文的请求/响应使用同类包装。认证头、Cookie 和其它 HTTP 头不会写入对象。
 - 图片编辑的 multipart 输入保存为 `{"format":"multipart","encoding":"base64","content_type":"multipart/form-data; boundary=...","data":"原始请求体的 base64","request_uuid":"..."}`，文件、mask、重复字段及边界均可无损还原。图片接口的 S3 捕获仍受单方向 32 MiB 限制，较大的图片请求/响应可正常转发，但归档状态会显示超限。
 - 单方向最多捕获 32 MiB；超限不上传截断内容，记录状态“超过 32 MiB，未存储”。S3 失败不重放模型调用，也不修改客户端响应；归档在响应刷出后进行有超时的尽力写入，进程中断或失败不会自动重试。调用记录展示输入/输出对象路径及各自状态（待写入、已存储、失败等）。

@@ -75,6 +75,7 @@ func (w *archiveWriter) Flush() {
 func (a *App) proxy(w http.ResponseWriter, r *http.Request) {
 	k := r.Context().Value(keyContext).(GatewayKey)
 	k.RequestUUID = uuid.NewString()
+	k.UserAgent = r.UserAgent()
 	r = r.WithContext(context.WithValue(r.Context(), keyContext, k))
 	w.Header().Set("X-Gateway-Request-ID", k.RequestUUID)
 	if a.Storage == nil || (!k.StoreInput && !k.StoreOutput) || r.URL.Path == "/v1/models" {

@@ -1538,6 +1538,12 @@ tbody tr:hover .actions-column {
 .request-log-table [data-column="created_at"] {
   width: 140px;
 }
+.request-user-agent {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
 .request-log-table .request-token-cell,
 .request-log-table .request-cost-cell {
   min-width: 0;
