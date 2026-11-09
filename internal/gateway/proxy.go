@@ -25,6 +25,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	model, pin, responseID := "", "", ""
 	serviceTier := ""
+	background := false
 	var body []byte
 	var imageBody *imageRequest
 	isResponse := false
@@ -51,6 +52,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			ServiceTier        string          `json:"service_tier"`
 			Conversation       json.RawMessage `json:"conversation"`
 			PreviousResponseID string          `json:"previous_response_id"`
+			Background         bool            `json:"background"`
 		}
 		if json.Unmarshal(body, &v) != nil {
 			writeError(w, 400, "invalid_json")
@@ -58,6 +60,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		model = v.Model
 		serviceTier = v.ServiceTier
+		background = v.Background
 		if model == "" {
 			writeError(w, 400, "model_required")
 			return
@@ -109,12 +112,18 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		body, k.EffectiveCacheTTL, k.CachePolicyResult, cacheErr = applyPromptCache(body, path, model, k)
 		if cacheErr != nil {
 			status := http.StatusBadRequest
-			if cacheErr.Error() == "request_too_large" { status = http.StatusRequestEntityTooLarge }
+			if cacheErr.Error() == "request_too_large" {
+				status = http.StatusRequestEntityTooLarge
+			}
 			writeError(w, status, cacheErr.Error())
 			return
 		}
-		if k.CachePolicyResult != "" { w.Header().Set("X-Gateway-Prompt-Cache", k.CachePolicyResult) }
-		if k.EffectiveCacheTTL != "" { w.Header().Set("X-Gateway-Prompt-Cache-TTL", k.EffectiveCacheTTL) }
+		if k.CachePolicyResult != "" {
+			w.Header().Set("X-Gateway-Prompt-Cache", k.CachePolicyResult)
+		}
+		if k.EffectiveCacheTTL != "" {
+			w.Header().Set("X-Gateway-Prompt-Cache-TTL", k.EffectiveCacheTTL)
+		}
 		k.CacheWriteLifetime = requestCacheWriteLifetime(body, path, model)
 		if k.CachePolicyResult == "first_system" && k.CacheWriteLifetime.TTL != "" {
 			k.CacheWriteLifetime.Source = "gateway_policy"
@@ -128,6 +137,29 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	if len(candidates) == 0 {
 		writeError(w, 503, "no_available_upstream")
 		return
+	}
+	var budget *keyBudgetGuard
+	if r.Method == "POST" && responseID == "" {
+		var allowed bool
+		budget, allowed = a.acquireKeyBudget(w, r, k, background)
+		if !allowed {
+			return
+		}
+		defer budget.finish()
+		if budget != nil {
+			// Bound the whole retry chain, including streaming, to the hold's
+			// active lifetime. Settlement still uses a detached context.
+			timeout := a.Config.RequestTimeout
+			if timeout <= 0 {
+				timeout = 10 * time.Minute
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			defer cancel()
+			r = r.WithContext(ctx)
+			if path == "/v1/chat/completions" {
+				body = budgetStreamUsage(body)
+			}
+		}
 	}
 	start := time.Now()
 	for index, u := range candidates {
@@ -152,6 +184,9 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			req.ContentLength = imageBody.size
 			req.GetBody = nil
 			req.Header.Set("Content-Type", imageBody.contentType)
+		}
+		if budget != nil {
+			budget.dispatched++
 		}
 		resp, e := a.Client.Do(req)
 		if e != nil {

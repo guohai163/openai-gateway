@@ -40,6 +40,9 @@ func (a *App) userList(w http.ResponseWriter, r *http.Request, resource string, 
 		start, end := a.monthRange()
 		var data []byte
 		err := a.DB.QueryRow(r.Context(), query, limit, offset, start, end, actor(r).ID).Scan(&data)
+		if err == nil {
+			data, err = a.withKeyBudgetUsage(r.Context(), data)
+		}
 		if err != nil {
 			adminDBError(w, err)
 		} else {

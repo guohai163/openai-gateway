@@ -54,6 +54,7 @@ import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
 import { KeyRoutingFields } from "./KeyRoutingFields";
 import { KeyCacheFields } from "./KeyCacheFields";
+import { KeyBudgetFields, KeyBudgetSummary } from "./KeyBudgetFields";
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import "./style.css";
@@ -328,6 +329,17 @@ function App() {
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
       if (isAdmin) {
+        input.spend_limits = {};
+        for (const currency of ["USD", "CNY"]) {
+          const limits: Row = {};
+          for (const period of ["daily", "weekly"]) {
+            const name = `budget_${currency}_${period}`;
+            const amount = String(input[name] ?? "").trim();
+            if (amount !== "") limits[period] = amount;
+            delete input[name];
+          }
+          if (Object.keys(limits).length) input.spend_limits[currency] = limits;
+        }
         input.upstream_key_ids = input.routing_all === "true" ? [] : form.getAll("upstream_key_ids");
         if (input.routing_ready !== "true" || (input.routing_mode === "primary_backup" && input.upstream_key_ids.length < 2) || (input.routing_all !== "true" && !input.upstream_key_ids.length) || input.upstream_key_ids.length > 64) {
           setError("invalid_routing_pool");
@@ -508,6 +520,7 @@ function App() {
       "name",
       ...(isAdmin ? ["owner_email"] : []),
       "month_cost",
+      "keyBudget",
       "models",
       "cidrs",
       ...(isAdmin ? ["keyRouting"] : []),
@@ -519,6 +532,7 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "keyBudget") return <KeyBudgetSummary row={r} t={t} locale={locale} />;
     if (c === "keyRouting") return <span>{t(r.routing_mode === "primary_backup" ? "routingPrimaryBackup" : "routingRoundRobin")}<small className="routing-summary">{r.upstream_key_ids?.length ? t("routingSelectedCount").replace("{count}", String(r.upstream_key_ids.length)) : t("routingAllUpstreams")}</small></span>;
     if (c === "enabled" && page === "upstream_keys") return <button type="button" role="switch" aria-checked={!!r.enabled} aria-label={`${t("enabled")} ${r.name}`} className={`upstream-toggle ${r.enabled ? "is-on" : ""}`} disabled={busy || loading} onClick={async () => {
       setBusy(true);
@@ -1221,6 +1235,7 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
+                    {isAdmin && <KeyBudgetFields key={`budget-${modal.id || "new"}`} row={modal} t={t} locale={locale} />}
                     {isAdmin && <KeyRoutingFields key={modal.id || "new"} row={modal} api={api} t={t} />}
                     {isAdmin && <KeyCacheFields key={`cache-${modal.id || "new"}`} row={modal} t={t} />}
                     {isAdmin && settings.storage && (

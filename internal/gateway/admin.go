@@ -16,20 +16,21 @@ import (
 )
 
 type resourceInput struct {
-	Name            string    `json:"name"`
-	Key             string    `json:"key"`
-	Platform        string    `json:"platform"`
-	ProbeModel      *string   `json:"probe_model"`
-	Enabled         *bool     `json:"enabled"`
-	Models          *[]string `json:"models"`
-	CIDRs           *[]string `json:"cidrs"`
-	ExpiresInDays   *int      `json:"expires_in_days"`
-	StoreInput      *bool     `json:"store_input"`
-	StoreOutput     *bool     `json:"store_output"`
-	RoutingMode     *string   `json:"routing_mode"`
-	UpstreamKeyIDs  *[]string `json:"upstream_key_ids"`
-	PromptCacheMode *string   `json:"prompt_cache_mode"`
-	PromptCacheTTL  *string   `json:"prompt_cache_ttl"`
+	Name            string       `json:"name"`
+	Key             string       `json:"key"`
+	Platform        string       `json:"platform"`
+	ProbeModel      *string      `json:"probe_model"`
+	Enabled         *bool        `json:"enabled"`
+	Models          *[]string    `json:"models"`
+	CIDRs           *[]string    `json:"cidrs"`
+	ExpiresInDays   *int         `json:"expires_in_days"`
+	StoreInput      *bool        `json:"store_input"`
+	StoreOutput     *bool        `json:"store_output"`
+	RoutingMode     *string      `json:"routing_mode"`
+	UpstreamKeyIDs  *[]string    `json:"upstream_key_ids"`
+	PromptCacheMode *string      `json:"prompt_cache_mode"`
+	PromptCacheTTL  *string      `json:"prompt_cache_ttl"`
+	SpendLimits     *spendLimits `json:"spend_limits"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -261,6 +262,13 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 		adminDBError(w, e)
 		return
 	}
+	if resource == "gateway_keys" {
+		b, e = a.withKeyBudgetUsage(r.Context(), b)
+		if e != nil {
+			adminDBError(w, e)
+			return
+		}
+	}
 	var data json.RawMessage = b
 	writeJSON(w, 200, map[string]any{"data": data, "limit": limit, "offset": offset})
 }
@@ -342,7 +350,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
-		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil) {
+		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil) {
 			writeError(w, 403, "forbidden")
 			return
 		}
@@ -445,6 +453,14 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 		}
 		defer keyTx.Rollback(ctx)
 		writer = keyTx
+		if in.SpendLimits != nil {
+			limits, err := normalizeSpendLimits(*in.SpendLimits)
+			if err != nil {
+				writeError(w, 400, "invalid_spend_limits")
+				return
+			}
+			in.SpendLimits = &limits
+		}
 		mode, ids := "round_robin", []string{}
 		cacheMode, cacheTTL := "inherit", "30m"
 		if !create {
@@ -524,6 +540,9 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	default:
 		writeError(w, 404, "not_found")
 		return
+	}
+	if e == nil && resource == "gateway_keys" && in.SpendLimits != nil {
+		_, e = keyTx.Exec(ctx, "UPDATE gateway_keys SET spend_limits=$2 WHERE id=$1 AND deleted_at IS NULL", id, *in.SpendLimits)
 	}
 	if e == nil && keyTx != nil {
 		e = keyTx.Commit(ctx)

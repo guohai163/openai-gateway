@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.14.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.14.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.14.2`。
+最新版本：[v1.16.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.16.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.16.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -432,6 +432,24 @@ docker compose up -d gateway
 - 以上接口支持 `?from=2026-10-01&to=2026-10-30`，结束日期包含当天；列表返回 `month_cost`、`month_requests` 和 `month_unknown`。
 
 私有 Key 名称旁提供复制按钮，直接调用已有的受管理员会话和 CSRF 保护的回显接口，并将完整密钥写入剪贴板。旧版只有哈希的 Key 会打开补录页面，不会自动更换密钥。
+
+## 私有 Key 日、周消费限额
+
+管理员在新建或编辑私有 Key 时，可分别设置 USD、CNY 的日限额和周限额；列表展示各周期已消费金额与限额。普通用户可以查看自己密钥的限额，不能修改。已有密钥默认不限额，需由管理员设置；留空表示不限额，`0` 表示立即禁止新的推理请求。同时调用 OpenAI、百炼时，应设置两种币种；金额按原币种累计，不进行汇率换算。
+
+- 按 `REPORT_TIMEZONE` 的自然日和自然周计算，每日 00:00、每周一 00:00 重置；修改名称、续期、轮换凭据或重启网关不会清空消费记录。启用限额时，当期已有消费也参与计算。
+- 达到任一限额（包含相等）后，在请求发往上游前返回 HTTP 429，错误码为 `daily_spend_limit_exceeded` / `weekly_spend_limit_exceeded`，带币种、周期、`reset_at` 和 `Retry-After`。模型列表、已有 Response 的读取、取消和删除仍可使用。
+- 启用任意限额后，同一私钥同时只放行一笔待结算的推理请求；并行请求立即返回 `budget_request_in_progress`（429）。预留状态存入 PostgreSQL，跨进程共享；不同私钥独立。Chat 流式请求自动要求上游返回用量，费用沿用现有快照计价与 Responses 去重逻辑；失败后切换上游不重复创建预留。
+- **单笔请求的费用在完成后才可确定，最后一笔可能使累计金额超过限额。** 此功能按本网关保存的估算费用拦截，不是上游官方账单的绝对硬封顶。预算密钥不支持 `background: true` 的 Responses（400，`budget_background_not_supported`）。
+- 成功请求缺少完整价格或用量、连接/流中断、请求日志写入失败或进程异常退出时，无法确认的费用不会视作免费；暂停该私钥后续推理，返回 `budget_usage_unknown`（429），直到相关预算周期结束。正常上游 4xx 拒绝和已去重用量不消耗预算；恢复探测不参与预算。
+
+`POST/PATCH /admin/api/gateway_keys[/ID]` 支持管理员字段 `spend_limits`，金额使用非负十进制**字符串**（最多 12 位整数、6 位小数）。省略字段保留原配置，传 `{}` 清除限额；传入对象替换整套限额。例：
+
+```json
+{"spend_limits":{"USD":{"daily":"5","weekly":"25"},"CNY":{"daily":"30","weekly":"150"}}}
+```
+
+列表返回 `spend_limits`、`budget_usage`（分币种的 `daily` / `weekly` 金额和未知费用数量）、`budget_timezone`、`budget_day_reset_at`、`budget_week_reset_at`。升级启动自动执行 `016_key_spend_limits.sql`，保留数据库卷与 `MASTER_KEY`。
 
 ## 可选 S3 请求 JSON 存储
 

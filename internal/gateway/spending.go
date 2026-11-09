@@ -118,7 +118,9 @@ func (a *App) keyMonthlyScope(resource string, limited bool) string {
 	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
 	if resource == "gateway_keys" {
 		column = "gateway_key_id"
-		fields := `id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal`
+		fields := `id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal,spend_limits,
+ (SELECT expires_at FROM gateway_budget_holds h WHERE h.gateway_key_id=gateway_keys.id AND (h.expires_at>now() OR h.active_until>now())) AS budget_hold_until,
+ (SELECT active_until FROM gateway_budget_holds h WHERE h.gateway_key_id=gateway_keys.id AND (h.expires_at>now() OR h.active_until>now())) AS budget_active_until`
 		filter := `deleted_at IS NULL`
 		if limited {
 			filter += ` AND user_id=$5`
