@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.16.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.16.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.16.0`。
+最新版本：[v1.17.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.17.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.17.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -421,6 +421,8 @@ docker compose up -d gateway
 ## 自然月消费与按模型查询
 
 概览、上游密钥和私有密钥提供自然月 Token 费用统计。密钥列表直接显示当月已知费用；点击“更多明细”向下展开各模型的请求次数、输入/输出 Token、输入/输出费用及合计。概览提供总消费展开区。可查询任意日期范围（最多 366 天，包含结束日期），也可切换当月或上月。
+
+私有密钥的费用明细另提供每日 Token 与费用折线图，随日期范围同步更新。点击图例可分别显示或隐藏总 Token、输入 Token、输出 Token 和各币种费用曲线；悬停查看每日精确数值，也可聚焦图表后用方向键切换日期。Token 与费用使用独立纵轴，USD、CNY 等币种分别统计；无请求日期补零，未知费用不作为零费用绘制，并提示未定价请求数。每日统计遵循报表时区。
 
 `REPORT_TIMEZONE=Asia/Shanghai` 决定自然月、查询日期和 S3 年月路径的时区。月初从该时区第一天 00:00 开始，下月第一天 00:00 结束。统计来自本网关已保存的单价快照，**不是 OpenAI 官方账单**；费用未知的请求单独显示数量，已知部分显示小计，不把缺失价格算成免费。恢复探测不计入客户消费，同一 Response 已去重的 Token 和费用不再次累计；同一请求的重试以请求 UUID 合并请求次数。
 

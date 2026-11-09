@@ -93,6 +93,24 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
  FROM filtered GROUP BY platform,model,currency
 ), currency_totals AS (
  SELECT currency,sum(total_cost)::text AS total_cost FROM filtered GROUP BY currency
+), daily_usage AS (
+ SELECT (created_at AT TIME ZONE $3)::date AS day,
+ count(DISTINCT coalesce(request_uuid::text,id))::bigint AS requests,
+ coalesce(sum(input_tokens),0)::bigint AS input_tokens,coalesce(sum(output_tokens),0)::bigint AS output_tokens,
+ count(*) FILTER(WHERE total_cost IS NULL AND usage_accounting<>'duplicate')::bigint AS unknown_cost_requests
+ FROM filtered GROUP BY day
+), daily_currency_totals AS (
+ SELECT (created_at AT TIME ZONE $3)::date AS day,currency,sum(total_cost)::text AS total_cost
+ FROM filtered GROUP BY day,currency
+), daily_totals AS (
+ SELECT day,json_object_agg(currency,total_cost) AS totals_by_currency FROM daily_currency_totals GROUP BY day
+), daily AS (
+ SELECT (($1::timestamptz AT TIME ZONE $3)::date + offset_day)::text AS date,
+ coalesce(u.requests,0) AS requests,coalesce(u.input_tokens,0) AS input_tokens,coalesce(u.output_tokens,0) AS output_tokens,
+ coalesce(u.unknown_cost_requests,0) AS unknown_cost_requests,coalesce(t.totals_by_currency,'{}'::json) AS totals_by_currency
+ FROM generate_series(0,($2::timestamptz AT TIME ZONE $3)::date-($1::timestamptz AT TIME ZONE $3)::date-1) AS days(offset_day)
+ LEFT JOIN daily_usage u ON u.day=($1::timestamptz AT TIME ZONE $3)::date + offset_day
+ LEFT JOIN daily_totals t ON t.day=u.day
 )
 SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
  'timezone',$3::text,
@@ -103,7 +121,8 @@ SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
  'total_cost',CASE WHEN count(DISTINCT currency)<=1 THEN sum(total_cost)::text END,
  'totals_by_currency',(SELECT coalesce(json_object_agg(currency,total_cost) FILTER(WHERE total_cost IS NOT NULL),'{}'::json) FROM currency_totals),
  'unknown_cost_requests',count(*) FILTER(WHERE total_cost IS NULL AND usage_accounting<>'duplicate')) FROM filtered),
- 'models',coalesce((SELECT json_agg(row_to_json(g) ORDER BY g.requests DESC,g.platform,g.model,g.currency) FROM grouped g),'[]'::json))`, args...).Scan(&data)
+ 'models',coalesce((SELECT json_agg(row_to_json(g) ORDER BY g.requests DESC,g.platform,g.model,g.currency) FROM grouped g),'[]'::json),
+ 'daily',coalesce((SELECT json_agg(row_to_json(d) ORDER BY d.date) FROM daily d),'[]'::json))`, args...).Scan(&data)
 	if err != nil {
 		adminDBError(w, err)
 		return

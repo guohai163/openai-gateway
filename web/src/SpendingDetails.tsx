@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { DailySpendingChart } from "./DailySpendingChart";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
@@ -204,6 +205,9 @@ export function SpendingDetails({
               </span>
             )}
           </p>
+          {resource === "gateway_keys" && data?.daily && (
+            <DailySpendingChart days={data.daily} locale={locale} t={t} />
+          )}
           <div className="table-scroll">
             <table className="spending-models">
               <thead>
