@@ -2099,8 +2099,8 @@ tbody tr:hover .actions-column {
   color: var(--warning);
 }
 .daily-spending {
-  margin: 0 0 24px;
-  padding: 18px 16px 10px;
+  margin: 0 0 16px;
+  padding: 12px 14px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -2109,11 +2109,17 @@ tbody tr:hover .actions-column {
 .daily-spending-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px 20px;
+  gap: 10px 16px;
+  margin-bottom: 8px;
+}
+.daily-spending-heading h3 {
+  font-size: 13px;
 }
 .daily-spending-heading small {
+  display: block;
+  margin-top: 3px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
@@ -2121,15 +2127,15 @@ tbody tr:hover .actions-column {
 .daily-spending-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 16px 0 10px;
+  gap: 4px 6px;
 }
 .daily-spending-legend button {
-  padding: 7px 10px;
+  padding: 5px 8px;
+  gap: 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--subtle);
-  font-size: 12px;
+  font-size: 11px;
 }
 .daily-spending-legend button:hover {
   background: var(--hover);
@@ -2141,16 +2147,18 @@ tbody tr:hover .actions-column {
 .daily-spending-legend button span,
 .daily-spending-tooltip i {
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: none;
+}
+.daily-spending-chart {
+  position: relative;
 }
 .daily-spending-scroll {
   overflow-x: auto;
 }
 .daily-spending-plot {
-  position: relative;
   min-width: 640px;
 }
 .daily-spending-plot svg {
@@ -2159,7 +2167,7 @@ tbody tr:hover .actions-column {
 }
 .daily-spending-axis {
   fill: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .daily-spending-grid {
@@ -2174,11 +2182,10 @@ tbody tr:hover .actions-column {
 .daily-spending-tooltip {
   position: absolute;
   z-index: 1;
-  top: 30px;
-  transform: translateX(-50%);
-  min-width: 230px;
-  max-width: 320px;
-  padding: 12px;
+  top: 18px;
+  right: 8px;
+  width: min(300px, calc(100% - 16px));
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -2188,7 +2195,7 @@ tbody tr:hover .actions-column {
 }
 .daily-spending-tooltip strong {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .daily-spending-tooltip > div,
 .daily-spending-tooltip span {
@@ -2198,8 +2205,8 @@ tbody tr:hover .actions-column {
 }
 .daily-spending-tooltip > div {
   justify-content: space-between;
-  gap: 20px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 4px;
 }
 .daily-spending-tooltip b {
   font-weight: 500;
@@ -2251,6 +2258,21 @@ tbody tr:hover .actions-column {
 .key-spending-row > td {
   padding: 0 22px 22px;
   background: var(--subtle);
+}
+.data-panel > .table-scroll {
+  container-type: inline-size;
+}
+.key-spending-row .spending-detail {
+  /* Keep expanded details inside the visible part of the wide keys table. */
+  width: calc(100cqi - 44px);
+  max-width: 100%;
+  white-space: normal;
+}
+.spending-detail .spending-expanded {
+  margin-top: 14px;
+}
+.spending-detail .spending-totals {
+  margin: 10px 0 12px;
 }
 .key-prefix {
   display: flex;
