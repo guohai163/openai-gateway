@@ -132,7 +132,9 @@ func TestBudgetDailyWeeklyAndCurrencyIsolation(t *testing.T) {
 		{"zero", "USD", currencySpendLimit{Daily: "0"}, nil, 0, "daily_spend_limit_exceeded"},
 		{"below", "USD", currencySpendLimit{Daily: "0.1"}, "0.0999999999999999", 0, ""},
 		{"previous-week", "USD", currencySpendLimit{Daily: "0.1", Weekly: "1"}, "10", 8 * 24 * time.Hour, ""},
-		{"unknown", "USD", currencySpendLimit{Daily: "1"}, nil, 0, "budget_usage_unknown"},
+		{"unknown-daily", "USD", currencySpendLimit{Daily: "1"}, nil, 0, ""},
+		{"unknown-weekly", "USD", currencySpendLimit{Weekly: "1"}, nil, 0, ""},
+		{"unknown-cny", "CNY", currencySpendLimit{Daily: "1", Weekly: "5"}, nil, 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, srv := testApp(t)
@@ -145,6 +147,10 @@ func TestBudgetDailyWeeklyAndCurrencyIsolation(t *testing.T) {
 			if tc.name != "zero" {
 				insertBudgetCost(t, a, "g1", tc.currency, tc.amount, time.Now().Add(-tc.age), 200, "recorded", "inference")
 			}
+			// Unknown records must neither block a call below the cap nor
+			// prevent known spending from triggering an actual daily/weekly cap.
+			insertBudgetCost(t, a, "g1", tc.currency, nil, time.Now(), 200, "unknown", "inference")
+			insertBudgetCost(t, a, "g1", tc.currency, nil, time.Now(), 502, "unknown", "inference")
 			// Another key and the other currency never consume this budget.
 			insertBudgetCost(t, a, "g2", tc.currency, "999", time.Now(), 200, "recorded", "inference")
 			other := "CNY"
@@ -226,7 +232,82 @@ func TestBudgetConcurrencyAndSettledCost(t *testing.T) {
 	}
 }
 
-func TestBudgetUnknownSettlementAndBackground(t *testing.T) {
+func TestBudgetUnknownCostsReleaseConcurrencyHold(t *testing.T) {
+	for _, scenario := range []string{"missing-price", "missing-usage", "upstream-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			a, srv := testApp(t)
+			seed(t, a)
+			if scenario != "missing-price" {
+				seedTestPrice(t, a)
+			}
+			setBudget(t, a, "g1", spendLimits{"USD": {Daily: "10", Weekly: "100"}})
+			var calls atomic.Int64
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				switch scenario {
+				case "missing-price":
+					fmt.Fprint(w, `{"usage":{"prompt_tokens":10,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":0}},"choices":[]}`)
+				case "missing-usage":
+					fmt.Fprint(w, `{"choices":[]}`)
+				case "upstream-error":
+					w.WriteHeader(502)
+					fmt.Fprint(w, `{"error":{"code":"upstream_error"}}`)
+				}
+			}))
+			defer up.Close()
+			a.Config.UpstreamURL = up.URL
+			want := 200
+			if scenario == "upstream-error" {
+				want = 502
+			}
+			for i := 0; i < 2; i++ {
+				status, b := request(t, srv.URL, "POST", "/v1/responses", "openai-g1", `{"model":"test-model","input":"hi"}`)
+				if status != want {
+					t.Fatal(status, string(b))
+				}
+			}
+			if calls.Load() != 2 {
+				t.Fatal("unknown costs prevented next upstream call", calls.Load())
+			}
+			var holds, unknown int
+			ctx := context.Background()
+			if err := a.DB.QueryRow(ctx, `SELECT count(*) FROM gateway_budget_holds WHERE gateway_key_id='g1'`).Scan(&holds); err != nil || holds != 0 {
+				t.Fatal("completed request retained a hold", holds, err)
+			}
+			if err := a.DB.QueryRow(ctx, `SELECT count(*) FROM request_logs WHERE gateway_key_id='g1' AND total_cost IS NULL`).Scan(&unknown); err != nil || unknown != 2 {
+				t.Fatal("unknown costs were lost or priced as zero", unknown, err)
+			}
+			w := httptest.NewRecorder()
+			a.adminList(w, httptest.NewRequest("GET", "/", nil), "gateway_keys")
+			var result struct {
+				Data []struct {
+					ID    string
+					Usage map[string]budgetUsage `json:"budget_usage"`
+					Hold  *time.Time             `json:"budget_hold_until"`
+				}
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String(), err)
+			}
+			found := false
+			for _, key := range result.Data {
+				if key.ID != "g1" {
+					continue
+				}
+				found = true
+				used := key.Usage["USD"]
+				if key.Hold != nil || used.DailyUnknown != 2 || used.WeeklyUnknown != 2 || used.Daily != "0" || used.Weekly != "0" {
+					t.Fatal("unknown costs or hold displayed incorrectly", w.Body.String())
+				}
+			}
+			if !found {
+				t.Fatal("key missing from budget list")
+			}
+		})
+	}
+}
+
+func TestBudgetMissingLogsAndLegacyHoldsDoNotBlock(t *testing.T) {
 	a, srv := testApp(t)
 	seed(t, a)
 	setBudget(t, a, "g1", spendLimits{"USD": {Daily: "10"}})
@@ -239,10 +320,10 @@ func TestBudgetUnknownSettlementAndBackground(t *testing.T) {
 	if status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model","messages":[]}`); status != 200 {
 		t.Fatal(status, string(b))
 	}
-	if status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model","messages":[]}`); status != 429 || !strings.Contains(string(b), "budget_usage_unknown") {
+	if status, b := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model","messages":[]}`); status != 200 {
 		t.Fatal(status, string(b))
 	}
-	// A dispatch without a log must retain its reservation across restarts.
+	// Finishing a request releases its hold even if metadata could not be saved.
 	if _, err := a.DB.Exec(context.Background(), "DELETE FROM request_logs; DELETE FROM gateway_budget_holds"); err != nil {
 		t.Fatal(err)
 	}
@@ -251,20 +332,34 @@ func TestBudgetUnknownSettlementAndBackground(t *testing.T) {
 	if !ok || g == nil {
 		t.Fatal("could not acquire budget")
 	}
-	g.dispatched = 1
 	g.finish()
 	w := httptest.NewRecorder()
-	if _, ok = a.acquireKeyBudget(w, httptest.NewRequest("POST", "/", nil), k, false); ok || !strings.Contains(w.Body.String(), "budget_usage_unknown") {
+	g, ok = a.acquireKeyBudget(w, httptest.NewRequest("POST", "/", nil), k, false)
+	if !ok || g == nil {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if _, err := a.DB.Exec(context.Background(), "UPDATE gateway_budget_holds SET expires_at=now()-interval '1 second',active_until=now()-interval '1 second'"); err != nil {
+	// Simulate an old release's unknown-cost hold: active request finished,
+	// but expires_at still points at the end of the weekly budget period.
+	if _, err := a.DB.Exec(context.Background(), "UPDATE gateway_budget_holds SET expires_at=now()+interval '7 days',active_until=now()-interval '1 second'"); err != nil {
 		t.Fatal(err)
 	}
-	g, ok = a.acquireKeyBudget(httptest.NewRecorder(), httptest.NewRequest("POST", "/", nil), k, false)
-	if !ok {
-		t.Fatal("expired reservation did not reset")
+	w = httptest.NewRecorder()
+	a.adminList(w, httptest.NewRequest("GET", "/", nil), "gateway_keys")
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"budget_hold_until":"`) {
+		t.Fatal("legacy hold still displayed as paused", w.Code, w.Body.String())
 	}
+	k.RequestUUID = uuid.NewString()
+	next, ok := a.acquireKeyBudget(httptest.NewRecorder(), httptest.NewRequest("POST", "/", nil), k, false)
+	if !ok || next == nil {
+		t.Fatal("legacy unknown-cost reservation blocked the key")
+	}
+	// A late cleanup for an older request must not release a new active call.
 	g.finish()
+	w = httptest.NewRecorder()
+	if _, ok := a.acquireKeyBudget(w, httptest.NewRequest("POST", "/", nil), k, false); ok || !strings.Contains(w.Body.String(), "budget_request_in_progress") {
+		t.Fatal("active concurrent call was not protected", w.Code, w.Body.String())
+	}
+	next.finish()
 }
 
 func TestBudgetStreamingAndRetryAccounting(t *testing.T) {

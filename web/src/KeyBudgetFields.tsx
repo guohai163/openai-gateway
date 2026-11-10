@@ -57,14 +57,8 @@ export function KeyBudgetSummary({ row, t, locale }: Props) {
     return <span className="muted">{t("unlimitedBudget")}</span>;
   return (
     <div className="key-budget-summary">
-      {row.budget_hold_until && (
-        <small role="status">
-          {t(
-            new Date(row.budget_active_until).getTime() > Date.now()
-              ? "budgetSettling"
-              : "budgetUnknown",
-          )}
-        </small>
+      {new Date(row.budget_active_until).getTime() > Date.now() && (
+        <small role="status">{t("budgetSettling")}</small>
       )}
       {Object.entries(limits).map(([currency, raw]) => {
         const limit = raw as Record<string, string>;
@@ -93,7 +87,7 @@ export function KeyBudgetSummary({ row, t, locale }: Props) {
                 {money(limit[period], locale, currency)}
               </span>
               {unknown > 0 && (
-                <small className="error-hint">{t("budgetUnknown")}</small>
+                <small>{t("budgetUnknown").replace("{count}", String(unknown))}</small>
               )}
             </div>
           );

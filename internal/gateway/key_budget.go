@@ -50,16 +50,6 @@ func (a *App) budgetPeriods(now time.Time) budgetPeriods {
 	return budgetPeriods{day, day.AddDate(0, 0, 1), week, week.AddDate(0, 0, 7)}
 }
 
-func (p budgetPeriods) holdEnd(limits spendLimits) time.Time {
-	end := p.DayEnd
-	for _, limit := range limits {
-		if limit.Weekly != "" {
-			return p.WeekEnd
-		}
-	}
-	return end
-}
-
 type budgetUsage struct {
 	Daily         string `json:"daily"`
 	Weekly        string `json:"weekly"`
@@ -67,8 +57,8 @@ type budgetUsage struct {
 	WeeklyUnknown int64  `json:"weekly_unknown"`
 }
 
-// Failed upstream rejections have no billable usage. Transport failures and
-// successful responses without a complete price remain unknown, never free.
+// Unknown costs remain visible separately from the known spending subtotal.
+// They do not prevent further calls or count as zero-priced requests.
 const budgetUnknownSQL = `total_cost IS NULL AND usage_accounting<>'duplicate' AND (status<400 OR status>=500)`
 const budgetUsageSQL = `SELECT coalesce(nullif(pricing_snapshot->>'currency',''),CASE WHEN platform='bailian' THEN 'CNY' ELSE 'USD' END) AS currency,
  coalesce(sum(total_cost) FILTER(WHERE created_at >= $2),0)::text,
@@ -110,8 +100,6 @@ func amountReached(spent, limit string) bool {
 type keyBudgetGuard struct {
 	app              *App
 	keyID, requestID string
-	limits           spendLimits
-	dispatched       int
 }
 
 func budgetStreamUsage(body []byte) []byte {
@@ -180,20 +168,13 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 		if amountReached(used.Weekly, limit.Weekly) {
 			return deny("weekly_spend_limit_exceeded", currency, "weekly", p.WeekEnd)
 		}
-		if limit.Weekly != "" && used.WeeklyUnknown > 0 {
-			return deny("budget_usage_unknown", currency, "weekly", p.WeekEnd)
-		}
-		if limit.Daily != "" && used.DailyUnknown > 0 {
-			return deny("budget_usage_unknown", currency, "daily", p.DayEnd)
-		}
 	}
-	var expires, active time.Time
-	err = tx.QueryRow(ctx, `SELECT expires_at,active_until FROM gateway_budget_holds WHERE gateway_key_id=$1 AND (expires_at>now() OR active_until>now())`, k.ID).Scan(&expires, &active)
+	var active time.Time
+	// Old releases retained unknown-cost holds until the budget period ended.
+	// Only an active request can block admission now; ignore those old holds.
+	err = tx.QueryRow(ctx, `SELECT active_until FROM gateway_budget_holds WHERE gateway_key_id=$1 AND active_until>now()`, k.ID).Scan(&active)
 	if err == nil {
-		if active.After(time.Now()) {
-			return deny("budget_request_in_progress", "", "", time.Now().Add(time.Second))
-		}
-		return deny("budget_usage_unknown", "", "", expires)
+		return deny("budget_request_in_progress", "", "", time.Now().Add(time.Second))
 	}
 	if err != pgx.ErrNoRows {
 		writeError(w, 503, "database_unavailable")
@@ -203,8 +184,9 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO gateway_budget_holds(gateway_key_id,request_uuid,expires_at,active_until) VALUES($1,$2,$3,$4)
- ON CONFLICT(gateway_key_id) DO UPDATE SET request_uuid=$2,expires_at=$3,active_until=$4`, k.ID, k.RequestUUID, p.holdEnd(limits), time.Now().Add(timeout+time.Minute))
+	activeUntil := time.Now().Add(timeout + time.Minute)
+	_, err = tx.Exec(ctx, `INSERT INTO gateway_budget_holds(gateway_key_id,request_uuid,expires_at,active_until) VALUES($1,$2,$3,$3)
+ ON CONFLICT(gateway_key_id) DO UPDATE SET request_uuid=$2,expires_at=$3,active_until=$3`, k.ID, k.RequestUUID, activeUntil)
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
@@ -212,7 +194,7 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 		writeError(w, 503, "database_unavailable")
 		return nil, false
 	}
-	return &keyBudgetGuard{app: a, keyID: k.ID, requestID: k.RequestUUID, limits: limits}, true
+	return &keyBudgetGuard{app: a, keyID: k.ID, requestID: k.RequestUUID}, true
 }
 
 func (g *keyBudgetGuard) finish() {
@@ -221,20 +203,9 @@ func (g *keyBudgetGuard) finish() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// Check every dispatched attempt, so a failed metadata write or an early
-	// return after dispatch cannot silently release an unaccounted request.
-	var settled bool
-	err := g.app.DB.QueryRow(ctx, `SELECT count(*)=$2 AND coalesce(bool_and(NOT (`+budgetUnknownSQL+`)),true)
- FROM request_logs WHERE request_uuid=$1`, g.requestID, g.dispatched).Scan(&settled)
-	if err != nil {
-		slog.Error("budget settlement failed")
-		return
-	}
-	if settled {
-		_, err = g.app.DB.Exec(ctx, `DELETE FROM gateway_budget_holds WHERE gateway_key_id=$1 AND request_uuid=$2`, g.keyID, g.requestID)
-	} else {
-		_, err = g.app.DB.Exec(ctx, `UPDATE gateway_budget_holds SET active_until=now(),expires_at=greatest(expires_at,$3) WHERE gateway_key_id=$1 AND request_uuid=$2`, g.keyID, g.requestID, g.app.budgetPeriods(time.Now()).holdEnd(g.limits))
-	}
+	// Metadata writes finish before this runs. Release concurrency protection
+	// even when the completed request's usage or price could not be determined.
+	_, err := g.app.DB.Exec(ctx, `DELETE FROM gateway_budget_holds WHERE gateway_key_id=$1 AND request_uuid=$2`, g.keyID, g.requestID)
 	if err != nil {
 		slog.Error("budget settlement failed")
 	}
