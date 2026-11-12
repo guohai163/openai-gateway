@@ -1039,6 +1039,19 @@ tbody tr:hover .actions-column {
 .oauth-continue:hover { background: var(--hover); }
 .oauth-continue img { width: 22px; height: 22px; }
 .oauth-empty { padding: 28px; }
+.oauth-account-usage { display: grid; gap: 5px; margin-top: 12px; width: 255px; max-width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.oauth-usage-row { display: grid; grid-template-columns: 33px 64px 42px 1fr; align-items: center; gap: 8px; }
+.oauth-usage-label { padding: 3px 0; border-radius: 5px; text-align: center; color: var(--positive); background: var(--positive-bg); font-weight: 600; }
+.oauth-usage-row.short .oauth-usage-label { color: var(--usage-blue, #627fe9); background: color-mix(in srgb, #627fe9 13%, var(--surface)); }
+.oauth-usage-track { height: 6px; border-radius: 8px; overflow: hidden; background: var(--border); }
+.oauth-usage-track > span { display: block; height: 100%; border-radius: inherit; background: var(--positive); }
+.oauth-usage-row.short .oauth-usage-track > span { background: var(--usage-blue, #627fe9); }
+.oauth-usage-percent { text-align: right; }
+.oauth-usage-reset { color: var(--muted); white-space: nowrap; }
+.oauth-usage-footer { display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.oauth-usage-message { font-size: 11px; white-space: normal; }
+.oauth-usage-refresh { padding: 2px !important; }
+.oauth-account-usage.is-stale .oauth-usage-row, .oauth-usage-row.is-expired { opacity: .55; }
 .modal {
   width: 520px;
   max-width: 100%;

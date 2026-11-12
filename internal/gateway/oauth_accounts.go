@@ -22,6 +22,15 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodGet {
+		usage, err := a.readOAuthUsage(ctx, parts[1])
+		if err != nil {
+			oauthAdminError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, usage)
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		var data []byte
 		err := a.DB.QueryRow(ctx, `SELECT coalesce(json_agg(t ORDER BY t.created_at,t.id),'[]') FROM (
@@ -296,7 +305,8 @@ func (a *App) completeOAuth(ctx context.Context, values url.Values, actorID, red
 		return err
 	}
 	_, err = a.DB.Exec(ctx, `UPDATE oauth_accounts SET issuer=$2,subject=$3,email=$4,credentials=$5,scopes=$6,expires_at=$7,next_refresh_at=$8,
- last_refreshed_at=now(),refresh_error='',refresh_failures=0,model_catalog='[]',model_synced_at=NULL,model_sync_error='' WHERE id=$1`,
+ last_refreshed_at=now(),refresh_error='',refresh_failures=0,model_catalog='[]',model_synced_at=NULL,model_sync_error='',
+ usage_snapshot='{}',usage_checked_at=NULL,usage_next_check_at=NULL,usage_error='' WHERE id=$1`,
 		accountID, oauthIssuer, identity.Subject, identity.Email, encrypted, strings.Fields(*tokens.Scope), expires, next)
 	if err != nil {
 		return err

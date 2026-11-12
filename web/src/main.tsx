@@ -831,7 +831,7 @@ function App() {
             </div>
           )}
           {page === "oauth_accounts" ? (
-            <OAuthAccounts api={api} t={t} onUnauthorized={signOut} />
+            <OAuthAccounts api={api} t={t} locale={locale} onUnauthorized={signOut} />
           ) : page === "pricing" ? (
             <ModelPricing
               api={api}

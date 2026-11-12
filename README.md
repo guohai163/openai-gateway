@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.18.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.18.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.18.0`。
+最新版本：[v1.19.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.19.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.19.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -14,6 +14,7 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 - 直接添加 OpenAI 或阿里云百炼 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
 - 独立的 ChatGPT OAuth 授权菜单：多账户接入、模型列表、Token 加密存储和自动续期；本阶段尚未接入推理路由。
+- OAuth 账号列支持查询并展示套餐 5 小时、每周窗口的剩余额度、进度条和重置倒计时，缺失窗口不推断为满额或已用尽。
 - 按可用模型轮询上游 Key，明确拒绝时最多尝试 3 个不同 Key。
 - 多用户系统：管理员及普通用户；全员密码＋TOTP 登录，管理员创建账号并生成一次性展示的 14 位初始密码。
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销；普通用户最多 3 个，只能使用有效定价模型、查看自己的密钥和调用情况。
@@ -35,6 +36,14 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 每次授权生成独立的 state、nonce 和 PKCE，回调只能使用一次；ID Token 通过 OpenAI 的 OIDC/JWKS 验证签名、issuer、audience、有效期和 nonce，重新授权还会检查原账户身份。稳定的主机 UUID 和每个账户的 issued client ID 保存在 PostgreSQL；Access/Refresh/ID Token 及待完成授权的秘密使用现有 `MASTER_KEY` 加密。Access/Refresh Token 不回传浏览器；保留的 ID Token 只作为 OpenAI 授权链接的 `id_token_hint` 使用。凭据不进入浏览器存储、日志或审计记录。续期持有账户行锁，避免多实例同时使用同一个轮换 Refresh Token。
 
 首次使用动态客户端注册，无需配置 client secret 或 API Key。重新授权复用该账户已注册的 client ID 与主机标识。数据库与 `MASTER_KEY` 必须一同备份；部署重启后会继续续期。OpenAI 侧撤销授权后，需要管理员重新登录授权，自动刷新不能恢复被撤销的会话。
+
+### OAuth 账户套餐额度
+
+账户名称下显示接口实际返回的 `5h`、`7d` 额度窗口，进度条和百分比表示**剩余**额度，右侧为距上游重置时间的倒计时；悬停可查看准确重置时间和数据更新时间。只返回每周窗口时仅展示 `7d`；缺失数据不显示为 `0%` 或 `100%`，跨过重置时间的数据标记“待刷新”。
+
+管理端接口为 `GET /admin/api/oauth_accounts/{id}/usage`，仅管理员可访问。页面打开时自动查询，此后每分钟读取一次；服务端按账户缓存 5 分钟，临近重置会提前失效，多实例通过数据库行锁合并同时到达的查询。点击账户下的刷新图标可重新读取，仍遵守服务端缓存及限流等待时间。关闭页面后不轮询额度，Token 续期任务继续独立运行。
+
+查询兼容 Codex 使用的 `https://chatgpt.com/backend-api/wham/usage` 接口。**此接口并非 SIWC 公共 API 的已承诺能力，当前动态注册的 Token 是否能访问取决于上游授权；尚未用真实 SIWC 账户验证兼容性。** 返回 `401`、`403` 或 `404` 时显示“额度暂不可查询”，等待 1 小时再尝试，不撤销现有授权、不因额度查询错误强制刷新 Token；临时失败保留并标记上次快照。实际额度始终可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。
 
 协议参考：[接入说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账户与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型列表](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 
