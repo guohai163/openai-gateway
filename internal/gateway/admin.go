@@ -41,6 +41,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	if !a.userAccess(w, r, parts) {
 		return
 	}
+	if resource == "oauth_accounts" {
+		a.oauthRoutes(w, r, parts)
+		return
+	}
 	if resource == "users" || resource == "account" {
 		a.accountRoutes(w, r, parts)
 		return

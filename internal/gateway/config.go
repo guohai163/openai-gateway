@@ -19,6 +19,7 @@ type Config struct {
 	UpstreamURL                                     string // Tests override this origin; production uses fixed origins per platform.
 	RequestTimeout                                  time.Duration
 	ReportTimezone                                  string
+	OAuthCallbackPort                               int
 	S3                                              S3Config
 }
 
@@ -59,6 +60,10 @@ func LoadConfig() (Config, error) {
 		c.RequestTimeout = time.Duration(n) * time.Second
 	}
 	c.ReportTimezone = env("REPORT_TIMEZONE", "Asia/Shanghai")
+	c.OAuthCallbackPort, err = strconv.Atoi(env("OAUTH_CALLBACK_PORT", "1455"))
+	if err != nil || c.OAuthCallbackPort < 1 || c.OAuthCallbackPort > 65535 {
+		return c, errors.New("invalid OAUTH_CALLBACK_PORT")
+	}
 	if _, err := time.LoadLocation(c.ReportTimezone); err != nil {
 		return c, errors.New("invalid REPORT_TIMEZONE")
 	}

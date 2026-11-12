@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.18.0 - 2026-11-12
+
+### Added
+
+- 管理后台新增独立的“OAuth 授权”菜单，与现有上游 API Key 管理分开；支持接入多个 ChatGPT 账户或工作区、备注及重新授权。
+- 按 OpenAI Sign in with ChatGPT 协议完成动态客户端注册、PKCE 授权码交换和 OIDC/JWKS 身份校验，持久化主机标识与账户 client ID；支持本机回环回调和远程部署粘贴完整回调 URL。
+- 独立保存和展示账户模型目录，授权完成后自动同步，支持手动更新；按上游顺序展示 `visibility=list` 的模型及其名称、Model ID。
+- Access/Refresh/ID Token 使用现有主密钥加密保存；后台每分钟检查，在到期前自动续期并遵守最早刷新时间。同一账户通过数据库行锁串行轮换，临时失败退避重试，失效或撤销后提示重新授权。
+
+### Validation
+
+- PostgreSQL 完整集成测试及 race 检查、Go 静态分析、25 项前端测试、TypeScript 检查与生产构建通过。
+- 覆盖 ID Token 签名、issuer、audience、nonce、到期校验，回调防重放、账户身份隔离、权限不足、并发续期及临时和终止性刷新错误；浏览器检查独立菜单、模型列表和远程回调表单。
+
+### Upgrade
+
+- 启动时自动执行 `017_oauth_accounts.sql`，新增 OAuth 主机、账户及授权事务表；升级前备份数据库，保留原数据卷与 `MASTER_KEY`。
+- 新增 `OAUTH_CALLBACK_PORT`，默认 `1455`，仅监听回环地址。Docker 或远程部署可使用 OAuth 页面中的回调 URL 粘贴入口，详见 README。
+- 本阶段仅接入 OAuth 账户、模型列表及自动续期，尚未接入推理路由；已有 API Key 调用方式继续使用原配置。
+- 固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.18.0`。
+
 ## v1.17.2 - 2026-11-10
 
 ### Fixed

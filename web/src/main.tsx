@@ -57,12 +57,14 @@ import { KeyCacheFields } from "./KeyCacheFields";
 import { KeyBudgetFields, KeyBudgetSummary } from "./KeyBudgetFields";
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
+import { OAuthAccounts } from "./OAuthAccounts";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
   | "overview"
   | "pricing"
   | "upstream_keys"
+  | "oauth_accounts"
   | "gateway_keys"
   | "logs"
   | "settings"
@@ -222,7 +224,7 @@ function App() {
       .catch(() => signOut());
   }, []);
   async function load() {
-    if (page === "pricing" || page === "users" || page === "account") return;
+    if (page === "pricing" || page === "users" || page === "account" || page === "oauth_accounts") return;
     const generation = sessionGeneration.current;
     const requestGeneration = ++loadGeneration.current;
     setLoading(true);
@@ -486,6 +488,7 @@ function App() {
   const nav: [Page, React.ReactNode][] = [
     ["overview", <LayoutDashboard size={18} />],
     ["upstream_keys", <KeyRound size={18} />],
+    ["oauth_accounts", <Globe size={18} />],
     ["pricing", <Coins size={18} />],
     ["gateway_keys", <ShieldCheck size={18} />],
     ["logs", <Activity size={18} />],
@@ -781,6 +784,8 @@ function App() {
                     ? "settingsHint"
                     : page === "pricing"
                     ? "pricingDescription"
+                    : page === "oauth_accounts"
+                    ? "oauthDescription"
                     : page === "gateway_keys" && !isAdmin
                     ? "userKeysHint"
                     : "subtitle"
@@ -788,7 +793,7 @@ function App() {
               </p>
             </div>
             <div className="heading-actions">
-              {!["pricing", "users", "account"].includes(page) && (
+              {!["pricing", "users", "account", "oauth_accounts"].includes(page) && (
                 <button
                   className="secondary"
                   disabled={loading || busy}
@@ -825,7 +830,9 @@ function App() {
               </button>
             </div>
           )}
-          {page === "pricing" ? (
+          {page === "oauth_accounts" ? (
+            <OAuthAccounts api={api} t={t} onUnauthorized={signOut} />
+          ) : page === "pricing" ? (
             <ModelPricing
               api={api}
               t={t}

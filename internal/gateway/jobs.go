@@ -135,6 +135,7 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
 	return e
 }
 func (a *App) RunJobs(ctx context.Context) {
+	go a.runOAuthJobs(ctx)
 	a.runCycle(ctx)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()

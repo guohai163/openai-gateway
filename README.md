@@ -6,13 +6,14 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.17.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.17.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.17.2`。
+最新版本：[v1.18.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.18.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.18.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
 ## 功能
 
 - 直接添加 OpenAI 或阿里云百炼 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
+- 独立的 ChatGPT OAuth 授权菜单：多账户接入、模型列表、Token 加密存储和自动续期；本阶段尚未接入推理路由。
 - 按可用模型轮询上游 Key，明确拒绝时最多尝试 3 个不同 Key。
 - 多用户系统：管理员及普通用户；全员密码＋TOTP 登录，管理员创建账号并生成一次性展示的 14 位初始密码。
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销；普通用户最多 3 个，只能使用有效定价模型、查看自己的密钥和调用情况。
@@ -21,6 +22,21 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - AES-256-GCM 加密上游凭据、私有 Key 和 TOTP 密钥；私有 Key 另存 SHA-256 哈希用于认证，管理员或所属用户可回显；密码 bcrypt；服务端会话、CSRF、登录限速与 OTP 防重放。
 - 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
 - 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。默认只记录调用元数据；配置 S3 后可按私钥选择存储输入/输出 JSON。
+
+## ChatGPT OAuth 接入
+
+管理员侧边栏中的 **上游密钥** 继续管理 API Key，**OAuth 授权** 单独管理 ChatGPT 账户。本阶段仅实现账户接入、账户模型列表和 Token 续期，OAuth 账户不会进入现有上游密钥池，也不会改变 `/v1/models` 或推理路由。
+
+1. 打开 **OAuth 授权**，填写账户或工作区备注，点击 **开始授权**，再点击 **Continue with ChatGPT** 在浏览器中完成登录与授权。
+2. 直接运行二进制时，回调监听 `127.0.0.1:1455/auth/callback`。端口可通过 `OAUTH_CALLBACK_PORT` 调整；只绑定回环地址。Docker 或远程部署使用页面中的 **远程部署 / 粘贴回调地址**：浏览器跳回无法访问的本机地址后，将地址栏中的完整 URL 粘贴回管理页面，10 分钟内完成。通过 HTTPS 或 SSH 转发访问远程管理后台。
+3. 授权完成后自动同步一次模型；可点击 **同步模型** 更新，再点击模型数量查看。只展示 OpenAI 返回的 `visibility=list` 模型，保留 `slug`、`display_name` 和服务端顺序。没有 ChatGPT 套餐使用权限的账户保留登录信息并提示重新授权。
+4. 后台独立任务在启动时和每分钟检查续期，默认在到期前 5 分钟刷新，且不早于 OpenAI 返回的 `earliest_refresh_at`。临时故障按 1 分钟至 1 小时退避重试；失效、撤销或重用的刷新 Token 停止续期并提示重新授权。页面显示到期、下次刷新、上次刷新及错误状态；到期可手动重试刷新。
+
+每次授权生成独立的 state、nonce 和 PKCE，回调只能使用一次；ID Token 通过 OpenAI 的 OIDC/JWKS 验证签名、issuer、audience、有效期和 nonce，重新授权还会检查原账户身份。稳定的主机 UUID 和每个账户的 issued client ID 保存在 PostgreSQL；Access/Refresh/ID Token 及待完成授权的秘密使用现有 `MASTER_KEY` 加密。Access/Refresh Token 不回传浏览器；保留的 ID Token 只作为 OpenAI 授权链接的 `id_token_hint` 使用。凭据不进入浏览器存储、日志或审计记录。续期持有账户行锁，避免多实例同时使用同一个轮换 Refresh Token。
+
+首次使用动态客户端注册，无需配置 client secret 或 API Key。重新授权复用该账户已注册的 client ID 与主机标识。数据库与 `MASTER_KEY` 必须一同备份；部署重启后会继续续期。OpenAI 侧撤销授权后，需要管理员重新登录授权，自动刷新不能恢复被撤销的会话。
+
+协议参考：[接入说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账户与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型列表](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 
 ## 使用 CI 镜像运行（推荐）
 

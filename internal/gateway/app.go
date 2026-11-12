@@ -30,6 +30,11 @@ type App struct {
 	pricingMu         sync.Mutex
 	Storage           ObjectStorage
 	IPLookupTransport http.RoundTripper // Optional transport injection for isolated tests.
+	oauthMu           sync.Mutex
+	oauthCallback     *http.Server
+	oauthRedirectURI  string
+	oauthContext      context.Context
+	oauthKeySet       oauthKeySet
 }
 type loginLimit struct {
 	Count int
@@ -45,7 +50,7 @@ func New(ctx context.Context, c Config) (*App, error) {
 		db.Close()
 		return nil, e
 	}
-	a := &App{DB: db, Config: c, rr: map[string]uint64{}, loginAttempts: map[string]loginLimit{}}
+	a := &App{DB: db, Config: c, rr: map[string]uint64{}, loginAttempts: map[string]loginLimit{}, oauthContext: ctx}
 	if c.S3.Enabled() {
 		a.Storage, e = newS3Storage(c.S3)
 		if e != nil {
