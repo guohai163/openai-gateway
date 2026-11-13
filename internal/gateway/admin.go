@@ -122,6 +122,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 {
+		if resource == "upstream_keys" && parts[2] == "test" && r.Method == http.MethodPost {
+			a.testUpstreamKey(w, r, parts[1])
+			return
+		}
 		if resource == "logs" && parts[2] == "ip_lookup" && r.Method == "POST" {
 			a.lookupLogIP(w, r, parts[1])
 			return

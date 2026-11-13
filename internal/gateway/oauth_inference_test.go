@@ -31,7 +31,7 @@ func TestOAuthTestResponsesProtocol(t *testing.T) {
 		fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"content\":[{\"type\":\"output_text\",\"text\":\"Hello!\"}]}]}}\n\n")
 	})}
 	result := a.requestOAuthTest(context.Background(), credentials, "supported-model")
-	if result.Error != "" || result.Output != "Hello!" || result.HTTPStatus != 200 || result.RequestID != "req-test" || result.Prompt != oauthTestPrompt {
+	if result.Error != "" || result.Output != "Hello!" || result.HTTPStatus != 200 || result.RequestID != "req-test" || result.Prompt != modelTestPrompt {
 		t.Fatal("completed test failed", result)
 	}
 }
@@ -40,18 +40,18 @@ func TestOAuthTestStreamTerminals(t *testing.T) {
 	for _, test := range []struct{ name, stream, want, code string }{
 		{"completed without separator", "data: {\"type\":\"response.completed\"}", "", ""},
 		{"multiline CRLF", ": keepalive\r\ndata: {\"type\":\r\ndata: \"response.completed\"}\r\n\r\n", "", ""},
-		{"empty", "", "oauth_test_interrupted", ""},
-		{"done without completed", "data: [DONE]\n\n", "oauth_test_interrupted", ""},
-		{"partial", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n", "oauth_test_interrupted", ""},
-		{"failed after delta", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\",\"message\":\"Limit reached\"}}}\n\n", "oauth_test_failed", "subscription_sharing_usage_limit_exceeded"},
-		{"top level error", "data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"Wait\"}\n\n", "oauth_test_failed", "rate_limit_exceeded"},
-		{"nested error", "data: {\"type\":\"error\",\"error\":{\"code\":\"invalid_model\",\"param\":\"model\"}}\n\n", "oauth_test_failed", "invalid_model"},
-		{"incomplete", "data: {\"type\":\"response.incomplete\"}\n\n", "oauth_test_incomplete", ""},
-		{"invalid data", "data: {broken}\n\n", "oauth_test_invalid_response", ""},
+		{"empty", "", "model_test_interrupted", ""},
+		{"done without completed", "data: [DONE]\n\n", "model_test_interrupted", ""},
+		{"partial", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n", "model_test_interrupted", ""},
+		{"failed after delta", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\",\"message\":\"Limit reached\"}}}\n\n", "model_test_failed", "subscription_sharing_usage_limit_exceeded"},
+		{"top level error", "data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"Wait\"}\n\n", "model_test_failed", "rate_limit_exceeded"},
+		{"nested error", "data: {\"type\":\"error\",\"error\":{\"code\":\"invalid_model\",\"param\":\"model\"}}\n\n", "model_test_failed", "invalid_model"},
+		{"incomplete", "data: {\"type\":\"response.incomplete\"}\n\n", "model_test_incomplete", ""},
+		{"invalid data", "data: {broken}\n\n", "model_test_invalid_response", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var result oauthTestResult
-			if got := readOAuthTestStream(strings.NewReader(test.stream), &result); got != test.want || result.ErrorCode != test.code {
+			var result modelTestResult
+			if got := readModelTestStream(strings.NewReader(test.stream), &result, false); got != test.want || result.ErrorCode != test.code {
 				t.Fatal(got, result)
 			}
 			if (test.name == "partial" || test.name == "failed after delta") && result.Output != "partial" {
@@ -79,13 +79,13 @@ func TestOAuthTestHTTPFailuresAndRedaction(t *testing.T) {
 			if strings.Contains(string(raw), strings.Repeat("s", 20)) || !strings.Contains(string(raw), "[redacted]") {
 				t.Fatal("upstream echoed a saved credential")
 			}
-			if result.HTTPStatus != status || (status != 200 && result.Error != "oauth_test_failed") {
+			if result.HTTPStatus != status || (status != 200 && result.Error != "model_test_failed") {
 				t.Fatal("HTTP failure lost", result)
 			}
 		})
 	}
 	a := &App{Client: &http.Client{Transport: ipLookupRoundTrip(func(*http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })}}
-	if result := a.requestOAuthTest(context.Background(), oauthCredentials{AccessToken: secret}, "model"); result.Error != "oauth_test_connection_failed" {
+	if result := a.requestOAuthTest(context.Background(), oauthCredentials{AccessToken: secret}, "model"); result.Error != "model_test_connection_failed" {
 		t.Fatal("network failure lost", result)
 	}
 }

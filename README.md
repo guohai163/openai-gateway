@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.20.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.20.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.20.2`。
+最新版本：[v1.21.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.21.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.21.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -22,6 +22,14 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - AES-256-GCM 加密上游凭据、私有 Key 和 TOTP 密钥；私有 Key 另存 SHA-256 哈希用于认证，管理员或所属用户可回显；密码 bcrypt；服务端会话、CSRF、登录限速与 OTP 防重放。
 - 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
 - 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。默认只记录调用元数据；配置 S3 后可按私钥选择存储输入/输出 JSON。
+
+## 上游密钥请求测试
+
+**上游密钥 / Upstream keys** 列表的 **操作 / Actions** 中提供 **测试** 按钮。选择此密钥已同步列表中支持文本对话的模型，点击 **发送测试请求**，服务端会固定使用该密钥发送 `Hello word!`，展示模型响应、耗时、远程 HTTP 状态、请求 ID 及脱敏后的错误详情。没有模型时先刷新该密钥的模型列表。
+
+管理员接口 `POST /admin/api/upstream_keys/{id}/test` 接受 `{"model":"模型 ID"}`，要求管理员会话及 CSRF。OpenAI 渠道请求 `/v1/responses`，百炼请求其 OpenAI 兼容 Chat Completions 接口，均以流式方式读取完成结果；后台校验模型确实属于所选密钥，不切换其他上游或重试失败请求。手动测试可用于诊断已停用或被阻断的密钥，不修改其启停、认证错误和额度恢复状态。
+
+测试会产生所选上游的实际用量；密钥只在服务端解密，不回传浏览器，审计仅保存测试操作和密钥 ID。文本测试不适用于仅支持图片、音频或 Embeddings 的模型。
 
 ## ChatGPT OAuth 接入
 

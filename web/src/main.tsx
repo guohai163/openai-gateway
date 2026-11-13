@@ -58,6 +58,7 @@ import { KeyBudgetFields, KeyBudgetSummary } from "./KeyBudgetFields";
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import { OAuthAccounts } from "./OAuthAccounts";
+import { ModelRequestTest } from "./ModelRequestTest";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -136,6 +137,7 @@ function App() {
     [notice, setNotice] = useState(""),
     [modal, setModal] = useState<Row | null>(null),
     [catalog, setCatalog] = useState<Row | null>(null),
+    [upstreamTest, setUpstreamTest] = useState<Row | null>(null),
     [usage, setUsage] = useState<Row | null>(null),
     [deleteTarget, setDeleteTarget] = useState<Row | null>(null),
     [newKeyInfo, setNewKeyInfo] = useState<Row | null>(null),
@@ -174,6 +176,7 @@ function App() {
     setLogTotal(0);
     setModal(null);
     setCatalog(null);
+    setUpstreamTest(null);
     setUsage(null);
     setDeleteTarget(null);
     setNewKeyInfo(null);
@@ -1091,6 +1094,13 @@ function App() {
                                   {page === "upstream_keys" && (
                                     <>
                                       <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => setUpstreamTest(r)}
+                                      >
+                                        {t("oauthTest")}
+                                      </button>
+                                      <button
                                         disabled={busy}
                                         onClick={() => action(r.id, "refresh")}
                                       >
@@ -1194,6 +1204,17 @@ function App() {
           </footer>
         </main>
       </div>
+      {upstreamTest && (
+        <ModelRequestTest
+          key={`upstream:${upstreamTest.id}`}
+          resource="upstream_keys"
+          account={{ id: upstreamTest.id, name: upstreamTest.name, models: upstreamTest.models }}
+          api={api}
+          t={t}
+          onUnauthorized={signOut}
+          onClose={() => setUpstreamTest(null)}
+        />
+      )}
       {modal && (
         <div className="modal-overlay">
           <section

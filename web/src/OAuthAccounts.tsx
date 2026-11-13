@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDateTime as date } from "./date-time.mjs";
-import { OAuthAccountTest } from "./OAuthAccountTest";
+import { ModelRequestTest } from "./ModelRequestTest";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
@@ -362,7 +362,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
         )}
       </section>
       {testing && (
-        <OAuthAccountTest
+        <ModelRequestTest
           key={testing.id}
           account={testing}
           api={api}

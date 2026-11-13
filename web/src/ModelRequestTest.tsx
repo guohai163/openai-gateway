@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Play, X } from "lucide-react";
 
 type Props = {
-  account: { id: string; name: string };
+  account: { id: string; name: string; models?: string[] };
+  resource?: "oauth_accounts" | "upstream_keys";
   api: (path: string, options?: RequestInit) => Promise<any>;
   t: (key: string) => string;
   onUnauthorized: () => void;
@@ -22,8 +23,9 @@ type Result = {
   detail: string;
 };
 
-export function OAuthAccountTest({
+export function ModelRequestTest({
   account,
+  resource = "oauth_accounts",
   api,
   t,
   onUnauthorized,
@@ -44,6 +46,19 @@ export function OAuthAccountTest({
     active.current = true;
     const abort = new AbortController();
     dialog.current?.showModal();
+    if (resource === "upstream_keys") {
+      const supported = (account.models || []).map((slug) => ({
+        slug,
+        display_name: slug,
+      }));
+      setModels(supported);
+      setModel(supported[0]?.slug || "");
+      setLoading(false);
+      return () => {
+        active.current = false;
+        controller.current?.abort();
+      };
+    }
     void api(`oauth_accounts/${encodeURIComponent(account.id)}/models`, {
       signal: abort.signal,
     })
@@ -66,7 +81,7 @@ export function OAuthAccountTest({
       abort.abort();
       controller.current?.abort();
     };
-  }, [account.id]);
+  }, [account.id, resource]);
 
   async function run() {
     if (busy || !models.some((entry) => entry.slug === model)) return;
@@ -77,7 +92,7 @@ export function OAuthAccountTest({
     controller.current = abort;
     try {
       const response = await api(
-        `oauth_accounts/${encodeURIComponent(account.id)}/test`,
+        `${resource}/${encodeURIComponent(account.id)}/test`,
         {
           method: "POST",
           body: JSON.stringify({ model }),
@@ -119,7 +134,11 @@ export function OAuthAccountTest({
           void run();
         }}
       >
-        <p className="muted">{t("oauthTestHint")}</p>
+        <p className="muted">
+          {t(
+            resource === "upstream_keys" ? "upstreamTestHint" : "oauthTestHint",
+          )}
+        </p>
         <label>
           {t("model")}
           <select
@@ -134,12 +153,20 @@ export function OAuthAccountTest({
           >
             {!models.length && (
               <option value="">
-                {t(loading ? "loading" : "oauthNoModels")}
+                {t(
+                  loading
+                    ? "loading"
+                    : resource === "upstream_keys"
+                      ? "upstreamTestNoModels"
+                      : "oauthNoModels",
+                )}
               </option>
             )}
             {models.map((entry) => (
               <option key={entry.slug} value={entry.slug}>
-                {entry.display_name} ({entry.slug})
+                {entry.display_name === entry.slug
+                  ? entry.slug
+                  : `${entry.display_name} (${entry.slug})`}
               </option>
             ))}
           </select>
