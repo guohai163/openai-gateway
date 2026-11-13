@@ -6,15 +6,14 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.19.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.19.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.19.0`。
+最新版本：[v1.20.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.20.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.20.2`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
 ## 功能
 
 - 直接添加 OpenAI 或阿里云百炼 API Key，自动同步并保存完整模型列表；共享全部可用上游密钥池。
-- 独立的 ChatGPT OAuth 授权菜单：多账户接入、模型列表、Token 加密存储和自动续期；本阶段尚未接入推理路由。
-- OAuth 账号列支持查询并展示套餐 5 小时、每周窗口的剩余额度、进度条和重置倒计时，缺失窗口不推断为满额或已用尽。
+- 独立的 ChatGPT OAuth 授权菜单：多账户接入、模型列表、Token 加密存储和自动续期；支持选择模型发送测试请求。
 - 按可用模型轮询上游 Key，明确拒绝时最多尝试 3 个不同 Key。
 - 多用户系统：管理员及普通用户；全员密码＋TOTP 登录，管理员创建账号并生成一次性展示的 14 位初始密码。
 - 私有 Key 独立 IPv4/IPv6/CIDR 白名单、模型权限、到期与撤销；普通用户最多 3 个，只能使用有效定价模型、查看自己的密钥和调用情况。
@@ -26,7 +25,7 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 ## ChatGPT OAuth 接入
 
-管理员侧边栏中的 **上游密钥** 继续管理 API Key，**OAuth 授权** 单独管理 ChatGPT 账户。本阶段仅实现账户接入、账户模型列表和 Token 续期，OAuth 账户不会进入现有上游密钥池，也不会改变 `/v1/models` 或推理路由。
+管理员侧边栏中的 **上游密钥** 继续管理 API Key，**OAuth 授权** 单独管理 ChatGPT 账户，提供账户接入、模型列表、Token 续期和手动请求测试。OAuth 账户不会进入现有上游密钥池，也不会改变 `/v1/models` 或推理路由。
 
 1. 打开 **OAuth 授权**，填写账户或工作区备注，点击 **开始授权**，再点击 **Continue with ChatGPT** 在浏览器中完成登录与授权。
 2. 直接运行二进制时，回调监听 `127.0.0.1:1455/auth/callback`。端口可通过 `OAUTH_CALLBACK_PORT` 调整；只绑定回环地址。Docker 或远程部署使用页面中的 **远程部署 / 粘贴回调地址**：浏览器跳回无法访问的本机地址后，将地址栏中的完整 URL 粘贴回管理页面，10 分钟内完成。通过 HTTPS 或 SSH 转发访问远程管理后台。
@@ -42,18 +41,6 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 账户操作中的 **测试** 可从该账户已同步的支持模型中选择一个，点击 **发送测试请求** 后由服务端使用该账户的 OAuth Access Token 请求 `POST https://api.openai.com/v1/responses`。请求内容固定为 `Hello word!`，使用数组形式的 `input`、`store=false` 和 `stream=true`；只有收到 `response.completed` 才显示成功。此测试会使用所选账户的 ChatGPT 套餐用量。
 
 管理接口 `POST /admin/api/oauth_accounts/{id}/test` 接受 `{"model":"模型 slug"}`，仅允许已同步列表中的模型，并校验套餐使用权限与 Token 有效期。返回模型响应、耗时、远程 HTTP 状态、请求 ID 及脱敏后的错误诊断；流中途失败、未完成、断流分别显示。Access/Refresh/ID Token 始终保留在服务端；测试不会切换账号或使用 API Key 计费。接口受管理员会话及 CSRF 保护，不加入私有 Key 的调度池。
-
-### OAuth 账户套餐额度
-
-账户名称下显示接口实际返回的 `5h`、`7d` 额度窗口，进度条和百分比表示**剩余**额度，右侧为距上游重置时间的倒计时；悬停可查看准确重置时间和数据更新时间。只返回每周窗口时仅展示 `7d`；缺失数据不显示为 `0%` 或 `100%`，跨过重置时间的数据标记“待刷新”。
-
-管理端 `GET /admin/api/oauth_accounts/{id}/usage` 只读取已保存快照；`POST` 到同一地址发起额度探测，均仅管理员可访问，POST 受 CSRF 保护。页面打开及点击刷新图标时请求探测，此后每分钟只读缓存；所有探测均遵守数据库中保存的 1 小时等待时间，多实例使用账户行锁合并并发请求。
-
-探测按 Codex 方式向 `https://chatgpt.com/backend-api/codex/responses` 发送 `codex-auto-review` 模型、`hi` 输入、`store=false`、`stream=true`，携带账户 Access Token，并从已保存 Token 的 `https://api.openai.com/auth` 对象中的 `chatgpt_account_id` 声明取得 `ChatGPT-Account-ID`（不是 `oaiapp_…` 客户端 ID）。从 `x-codex-primary-*`、`x-codex-secondary-*` 响应头提取已用比例、窗口分钟数及重置秒数，以 `300`、`10080` 分钟识别 5 小时和每周额度；收到响应头后即关闭流，不等待模型生成。HTTP 429 若携带有效窗口，也能记录真实的耗尽额度。
-
-**成功获得有效窗口后，后台每小时自动探测一次，关闭网页和服务重启后继续执行。** 首次失败或未返回有效额度头的账号不自动探测；页面打开或手动刷新可在等待期后重试。已成功账号后续探测失败时保留上次快照并标记错误，一小时后重试（上游要求更长等待时遵守 `Retry-After`）。重置时间仅用于展示，不会提前触发额外推理。额度任务与 Token 续期独立运行。
-
-**探测会实际使用账户套餐用量；接口和探测模型不属于 SIWC 公共 API 的承诺能力，是否可访问取决于当前授权。** 之前的 `/wham/usage` 查询被当前线上 SIWC 授权拒绝，不代表本探测已经验证成功。拒绝、未返回额度头、网络失败时显示明确原因及远程 HTTP 状态，不撤销现有授权、不切换 API Key 计费；真实额度也可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。已有迁移 `018_oauth_usage.sql` 保存快照与调度时间，无新增迁移和配置。
 
 协议参考：[接入说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账户与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型列表](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 

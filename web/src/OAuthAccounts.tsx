@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDateTime as date } from "./date-time.mjs";
-import { OAuthAccountUsage } from "./OAuthAccountUsage";
 import { OAuthAccountTest } from "./OAuthAccountTest";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
   t: (key: string) => string;
   onUnauthorized: () => void;
-  locale: string;
 };
 type Account = {
   id: string;
@@ -31,7 +29,7 @@ type Attempt = {
   redirect_uri: string;
 };
 
-export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
+export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
   const [pending, setPending] = useState<Attempt | null>(null);
@@ -266,15 +264,6 @@ export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
                         {account.client_id || t("pending")}
                       </code>
                     </div>
-                    <OAuthAccountUsage
-                      accountId={account.id}
-                      status={account.status}
-                      refreshedAt={account.last_refreshed_at}
-                      api={api}
-                      t={t}
-                      locale={locale}
-                      onUnauthorized={onUnauthorized}
-                    />
                   </td>
                   <td>
                     <span
@@ -435,15 +424,6 @@ export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
           )}
         </section>
       )}
-      <p className="muted">
-        <a
-          href="https://chatgpt.com/settings/usage"
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          {t("oauthUsage")}
-        </a>
-      </p>
     </div>
   );
 }

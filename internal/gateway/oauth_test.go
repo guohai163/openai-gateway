@@ -27,7 +27,7 @@ func oauthFixtureClient(t *testing.T, handler http.HandlerFunc) *http.Client {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return &http.Client{Transport: ipLookupRoundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "auth.openai.com" && r.URL.Host != "api.openai.com" && r.URL.Host != "chatgpt.com" {
+		if r.URL.Host != "auth.openai.com" && r.URL.Host != "api.openai.com" {
 			return nil, fmt.Errorf("unexpected OAuth origin")
 		}
 		clone := r.Clone(r.Context())
