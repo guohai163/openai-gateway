@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDateTime as date } from "./date-time.mjs";
 import { OAuthAccountUsage } from "./OAuthAccountUsage";
+import { OAuthAccountTest } from "./OAuthAccountTest";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
@@ -39,6 +40,7 @@ export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Account | null>(null);
   const [catalog, setCatalog] = useState<any>(null);
+  const [testing, setTesting] = useState<Account | null>(null);
   const mounted = useRef(true);
   const modelGeneration = useRef(0);
 
@@ -311,6 +313,12 @@ export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
                   <td>
                     <div className="row-actions">
                       <button
+                        disabled={busy || account.status !== "connected"}
+                        onClick={() => setTesting(account)}
+                      >
+                        {t("oauthTest")}
+                      </button>
+                      <button
                         disabled={busy || !!pending}
                         onClick={() => void authorize(account)}
                       >
@@ -364,6 +372,16 @@ export function OAuthAccounts({ api, t, onUnauthorized, locale }: Props) {
           <p className="oauth-empty muted">{t("oauthNoAccounts")}</p>
         )}
       </section>
+      {testing && (
+        <OAuthAccountTest
+          key={testing.id}
+          account={testing}
+          api={api}
+          t={t}
+          onUnauthorized={onUnauthorized}
+          onClose={() => setTesting(null)}
+        />
+      )}
       {selected && (
         <section className="panel account-panel">
           <div className="panel-heading">

@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.20.0 - 2026-11-13
+
+### Added
+
+- OAuth 账户操作新增“测试”：从该账户支持的模型中选择一个，发送固定消息 `Hello word!`，展示模型响应、耗时、远程 HTTP 状态和请求 ID；支持中英文及窄屏弹窗。
+- 新增管理员专用请求测试接口，使用所选账户的 OAuth 授权调用官方 Responses API，按 SIWC 要求设置 `store=false`、`stream=true` 和数组形式的输入；只有收到 `response.completed` 才判定成功，区分远程失败、未完成及断流。
+- 服务端校验账户套餐权限、Token 有效期和模型目录，远程错误及输出中的已保存凭据进行脱敏，测试不加入现有 API Key 调度池。
+
+### Fixed
+
+- 余量查询失败时直接显示具体原因、ChatGPT 用量入口和下次查询时间，避免仅显示含义不明的 `unavailable`。线上已确认当前 SIWC 动态注册授权被 Codex 余量接口拒绝；该限制不代表账号断开或额度耗尽，真实余量需在 ChatGPT 用量设置中查看。
+
+### Validation
+
+- 完整 Go 测试、PostgreSQL 集成测试、race 检查与 `go vet` 静态分析通过。
+- 验证 Responses 请求格式、固定消息、流完成判定、中途失败、断流、远程错误及凭据脱敏；通过 PostgreSQL 集成测试验证管理员权限、账户隔离及模型限制。
+- 28 项前端测试、TypeScript 检查和生产构建通过；浏览器使用模拟响应验证成功、失败和模型切换，并检查 670px 窄屏布局。
+
+### Upgrade
+
+- 无新增数据库迁移或环境变量，保留原数据卷与 `MASTER_KEY`。更新后刷新整个管理页面。
+- 测试请求会消耗所选账户的 ChatGPT 套餐用量。
+- 固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.20.0`。
+
 ## v1.19.0 - 2026-11-12
 
 ### Added

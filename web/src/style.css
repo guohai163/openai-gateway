@@ -1052,6 +1052,17 @@ tbody tr:hover .actions-column {
 .oauth-usage-message { font-size: 11px; white-space: normal; }
 .oauth-usage-refresh { padding: 2px !important; }
 .oauth-account-usage.is-stale .oauth-usage-row, .oauth-usage-row.is-expired { opacity: .55; }
+.oauth-usage-retry { display: block; margin-top: 4px; }
+dialog.oauth-test-modal { margin: auto; padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--border); width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; }
+dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
+.oauth-test-modal form { display: grid; gap: 18px; padding: 20px 24px 0; }
+.oauth-test-modal label { display: grid; gap: 8px; }
+.oauth-test-modal select { width: 100%; min-width: 0; }
+.oauth-test-prompt, .oauth-test-result { display: grid; gap: 8px; }
+.oauth-test-result { padding: 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.oauth-test-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0; font-size: 13px; }
+.oauth-test-success { color: var(--positive); }
+.oauth-test-modal .modal-footer { margin: 0 -24px; }
 .modal {
   width: 520px;
   max-width: 100%;

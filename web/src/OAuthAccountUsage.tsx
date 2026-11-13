@@ -168,6 +168,28 @@ export function OAuthAccountUsage({
           <RefreshCw size={12} className={busy ? "spinning" : ""} />
         </button>
       </div>
+      {failure && (
+        <small className="oauth-usage-message muted">
+          {t(failure)}
+          {failure === "oauth_usage_not_supported" && (
+            <>
+              {" "}
+              <a
+                href="https://chatgpt.com/settings/usage"
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {t("oauthUsageView")}
+              </a>
+            </>
+          )}
+          {usage?.next_check_at && (
+            <span className="oauth-usage-retry">
+              {t("oauthUsageNextCheck")}: {date(usage.next_check_at)}
+            </span>
+          )}
+        </small>
+      )}
     </div>
   );
 }

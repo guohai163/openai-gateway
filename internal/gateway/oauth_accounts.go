@@ -22,6 +22,22 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(parts) == 3 && parts[2] == "test" && r.Method == http.MethodPost {
+		var in struct {
+			Model string `json:"model"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		result, err := a.testOAuthAccount(ctx, parts[1], strings.TrimSpace(in.Model))
+		if err != nil {
+			oauthAdminError(w, err)
+			return
+		}
+		a.audit(ctx, "oauth_test", "oauth_accounts", parts[1])
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	if len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodGet {
 		usage, err := a.readOAuthUsage(ctx, parts[1])
 		if err != nil {

@@ -37,13 +37,19 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 首次使用动态客户端注册，无需配置 client secret 或 API Key。重新授权复用该账户已注册的 client ID 与主机标识。数据库与 `MASTER_KEY` 必须一同备份；部署重启后会继续续期。OpenAI 侧撤销授权后，需要管理员重新登录授权，自动刷新不能恢复被撤销的会话。
 
+### OAuth 账户请求测试
+
+账户操作中的 **测试** 可从该账户已同步的支持模型中选择一个，点击 **发送测试请求** 后由服务端使用该账户的 OAuth Access Token 请求 `POST https://api.openai.com/v1/responses`。请求内容固定为 `Hello word!`，使用数组形式的 `input`、`store=false` 和 `stream=true`；只有收到 `response.completed` 才显示成功。此测试会使用所选账户的 ChatGPT 套餐用量。
+
+管理接口 `POST /admin/api/oauth_accounts/{id}/test` 接受 `{"model":"模型 slug"}`，仅允许已同步列表中的模型，并校验套餐使用权限与 Token 有效期。返回模型响应、耗时、远程 HTTP 状态、请求 ID 及脱敏后的错误诊断；流中途失败、未完成、断流分别显示。Access/Refresh/ID Token 始终保留在服务端；测试不会切换账号或使用 API Key 计费。接口受管理员会话及 CSRF 保护，不加入私有 Key 的调度池。
+
 ### OAuth 账户套餐额度
 
 账户名称下显示接口实际返回的 `5h`、`7d` 额度窗口，进度条和百分比表示**剩余**额度，右侧为距上游重置时间的倒计时；悬停可查看准确重置时间和数据更新时间。只返回每周窗口时仅展示 `7d`；缺失数据不显示为 `0%` 或 `100%`，跨过重置时间的数据标记“待刷新”。
 
 管理端接口为 `GET /admin/api/oauth_accounts/{id}/usage`，仅管理员可访问。页面打开时自动查询，此后每分钟读取一次；服务端按账户缓存 5 分钟，临近重置会提前失效，多实例通过数据库行锁合并同时到达的查询。点击账户下的刷新图标可重新读取，仍遵守服务端缓存及限流等待时间。关闭页面后不轮询额度，Token 续期任务继续独立运行。
 
-查询兼容 Codex 使用的 `https://chatgpt.com/backend-api/wham/usage` 接口。**此接口并非 SIWC 公共 API 的已承诺能力，当前动态注册的 Token 是否能访问取决于上游授权；尚未用真实 SIWC 账户验证兼容性。** 返回 `401`、`403` 或 `404` 时显示“额度暂不可查询”，等待 1 小时再尝试，不撤销现有授权、不因额度查询错误强制刷新 Token；临时失败保留并标记上次快照。实际额度始终可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。
+查询兼容 Codex 使用的 `https://chatgpt.com/backend-api/wham/usage` 接口。**此接口并非 SIWC 公共 API 的已承诺能力，当前动态注册的 Token 是否能访问取决于上游授权；已确认当前线上 SIWC 动态注册授权被额度接口拒绝，因此无法返回真实余量。官方 SIWC 文档仅指引到 ChatGPT 用量设置，未公开可替换的余量查询接口。** 返回 `401`、`403` 或 `404` 时显示“额度暂不可查询”、具体授权限制、ChatGPT 用量入口及下次查询时间，等待 1 小时再尝试，不撤销现有授权、不因额度查询错误强制刷新 Token；临时失败保留并标记上次快照。实际额度始终可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。
 
 协议参考：[接入说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账户与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型列表](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 
