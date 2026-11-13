@@ -22,6 +22,15 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(parts) == 3 && parts[2] == "usage" && r.Method == http.MethodPost {
+		usage, err := a.refreshOAuthUsage(ctx, parts[1])
+		if err != nil {
+			oauthAdminError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, usage)
+		return
+	}
 	if len(parts) == 3 && parts[2] == "test" && r.Method == http.MethodPost {
 		var in struct {
 			Model string `json:"model"`
@@ -508,6 +517,8 @@ func (a *App) runOAuthCycle(ctx context.Context) {
 }
 
 func (a *App) runOAuthJobs(ctx context.Context) {
+	// Keep potentially slow quota probes independent of token renewal.
+	go a.runOAuthUsageJobs(ctx)
 	a.runOAuthCycle(ctx)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -517,6 +528,20 @@ func (a *App) runOAuthJobs(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.runOAuthCycle(ctx)
+		}
+	}
+}
+
+func (a *App) runOAuthUsageJobs(ctx context.Context) {
+	a.runOAuthUsageCycle(ctx)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.runOAuthUsageCycle(ctx)
 		}
 	}
 }

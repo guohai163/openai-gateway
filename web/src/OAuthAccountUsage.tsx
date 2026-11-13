@@ -18,6 +18,8 @@ type Usage = {
   checked_at: string | null;
   next_check_at: string | null;
   error: string;
+  source: string;
+  http_status: number;
 };
 type Props = {
   accountId: string;
@@ -53,11 +55,13 @@ export function OAuthAccountUsage({
     }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let first = true;
     async function load() {
       setBusy(true);
       try {
         const result = await api(
           `oauth_accounts/${encodeURIComponent(accountId)}/usage`,
+          first ? { method: "POST", body: "{}" } : undefined,
         );
         if (cancelled) return;
         setUsage(result);
@@ -68,6 +72,7 @@ export function OAuthAccountUsage({
         setError(code);
         if (code === "unauthorized") onUnauthorized();
       } finally {
+        first = false;
         if (!cancelled) {
           setBusy(false);
           setNow(Date.now());
@@ -168,9 +173,20 @@ export function OAuthAccountUsage({
           <RefreshCw size={12} className={busy ? "spinning" : ""} />
         </button>
       </div>
+      {usage?.source === "codex_headers" && (
+        <small className="oauth-usage-message muted">
+          {t("oauthUsageHourly")}
+          {usage.next_check_at && (
+            <span className="oauth-usage-retry">
+              {t("oauthUsageNextCheck")}: {date(usage.next_check_at)}
+            </span>
+          )}
+        </small>
+      )}
       {failure && (
         <small className="oauth-usage-message muted">
           {t(failure)}
+          {!!usage?.http_status && ` (HTTP ${usage.http_status})`}
           {failure === "oauth_usage_not_supported" && (
             <>
               {" "}
@@ -183,7 +199,7 @@ export function OAuthAccountUsage({
               </a>
             </>
           )}
-          {usage?.next_check_at && (
+          {usage?.next_check_at && usage.source !== "codex_headers" && (
             <span className="oauth-usage-retry">
               {t("oauthUsageNextCheck")}: {date(usage.next_check_at)}
             </span>

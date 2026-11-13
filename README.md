@@ -47,9 +47,13 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 账户名称下显示接口实际返回的 `5h`、`7d` 额度窗口，进度条和百分比表示**剩余**额度，右侧为距上游重置时间的倒计时；悬停可查看准确重置时间和数据更新时间。只返回每周窗口时仅展示 `7d`；缺失数据不显示为 `0%` 或 `100%`，跨过重置时间的数据标记“待刷新”。
 
-管理端接口为 `GET /admin/api/oauth_accounts/{id}/usage`，仅管理员可访问。页面打开时自动查询，此后每分钟读取一次；服务端按账户缓存 5 分钟，临近重置会提前失效，多实例通过数据库行锁合并同时到达的查询。点击账户下的刷新图标可重新读取，仍遵守服务端缓存及限流等待时间。关闭页面后不轮询额度，Token 续期任务继续独立运行。
+管理端 `GET /admin/api/oauth_accounts/{id}/usage` 只读取已保存快照；`POST` 到同一地址发起额度探测，均仅管理员可访问，POST 受 CSRF 保护。页面打开及点击刷新图标时请求探测，此后每分钟只读缓存；所有探测均遵守数据库中保存的 1 小时等待时间，多实例使用账户行锁合并并发请求。
 
-查询兼容 Codex 使用的 `https://chatgpt.com/backend-api/wham/usage` 接口。**此接口并非 SIWC 公共 API 的已承诺能力，当前动态注册的 Token 是否能访问取决于上游授权；已确认当前线上 SIWC 动态注册授权被额度接口拒绝，因此无法返回真实余量。官方 SIWC 文档仅指引到 ChatGPT 用量设置，未公开可替换的余量查询接口。** 返回 `401`、`403` 或 `404` 时显示“额度暂不可查询”、具体授权限制、ChatGPT 用量入口及下次查询时间，等待 1 小时再尝试，不撤销现有授权、不因额度查询错误强制刷新 Token；临时失败保留并标记上次快照。实际额度始终可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。
+探测按 Codex 方式向 `https://chatgpt.com/backend-api/codex/responses` 发送 `codex-auto-review` 模型、`hi` 输入、`store=false`、`stream=true`，携带账户 Access Token，并从已保存 Token 的 `https://api.openai.com/auth` 对象中的 `chatgpt_account_id` 声明取得 `ChatGPT-Account-ID`（不是 `oaiapp_…` 客户端 ID）。从 `x-codex-primary-*`、`x-codex-secondary-*` 响应头提取已用比例、窗口分钟数及重置秒数，以 `300`、`10080` 分钟识别 5 小时和每周额度；收到响应头后即关闭流，不等待模型生成。HTTP 429 若携带有效窗口，也能记录真实的耗尽额度。
+
+**成功获得有效窗口后，后台每小时自动探测一次，关闭网页和服务重启后继续执行。** 首次失败或未返回有效额度头的账号不自动探测；页面打开或手动刷新可在等待期后重试。已成功账号后续探测失败时保留上次快照并标记错误，一小时后重试（上游要求更长等待时遵守 `Retry-After`）。重置时间仅用于展示，不会提前触发额外推理。额度任务与 Token 续期独立运行。
+
+**探测会实际使用账户套餐用量；接口和探测模型不属于 SIWC 公共 API 的承诺能力，是否可访问取决于当前授权。** 之前的 `/wham/usage` 查询被当前线上 SIWC 授权拒绝，不代表本探测已经验证成功。拒绝、未返回额度头、网络失败时显示明确原因及远程 HTTP 状态，不撤销现有授权、不切换 API Key 计费；真实额度也可前往 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 查看。已有迁移 `018_oauth_usage.sql` 保存快照与调度时间，无新增迁移和配置。
 
 协议参考：[接入说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账户与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型列表](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 
