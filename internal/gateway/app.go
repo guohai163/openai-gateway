@@ -28,6 +28,7 @@ type App struct {
 	loginAttempts     map[string]loginLimit
 	jobMu             sync.Mutex
 	pricingMu         sync.Mutex
+	logStreams        requestLogStreams
 	Storage           ObjectStorage
 	IPLookupTransport http.RoundTripper // Optional transport injection for isolated tests.
 	oauthMu           sync.Mutex

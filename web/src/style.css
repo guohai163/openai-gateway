@@ -2427,6 +2427,15 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
   flex-wrap: wrap;
   gap: 12px;
 }
+.log-live-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.log-live-control small {
+  font-size: 12px;
+}
 .log-filter-count {
   padding: 2px 7px;
   border-radius: 5px;

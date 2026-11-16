@@ -61,6 +61,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		a.readLogArchive(w, r, parts[1], parts[3])
 		return
 	}
+	if resource == "logs" && len(parts) == 2 && parts[1] == "stream" && r.Method == http.MethodGet {
+		a.streamRequestLogs(w, r)
+		return
+	}
 	if resource == "pricing" {
 		a.pricingAdmin(w, r, parts)
 		return

@@ -59,6 +59,7 @@ import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import { OAuthAccounts } from "./OAuthAccounts";
 import { ModelRequestTest } from "./ModelRequestTest";
+import { subscribeRequestLogs } from "./log-live.mjs";
 import "./style.css";
 type Row = Record<string, any>;
 type Page =
@@ -154,6 +155,9 @@ function App() {
   });
   const [logOptions, setLogOptions] = useState<LogFilterOptions>({});
   const [logTotal, setLogTotal] = useState(0);
+  const [logAutoRefresh, setLogAutoRefresh] = useState(true);
+  const [logLiveStatus, setLogLiveStatus] = useState("connecting");
+  const liveLogLoad = useRef<() => Promise<void>>(async () => {});
   const authChannel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
@@ -226,12 +230,14 @@ function App() {
       .then((v) => acceptSession(v))
       .catch(() => signOut());
   }, []);
-  async function load() {
+  async function load(silent = false) {
     if (page === "pricing" || page === "users" || page === "account" || page === "oauth_accounts") return;
     const generation = sessionGeneration.current;
     const requestGeneration = ++loadGeneration.current;
-    setLoading(true);
-    setError("");
+    if (!silent) {
+      setLoading(true);
+      setError("");
+    }
     try {
       const q = new URLSearchParams({ limit: "100", offset: String(offset) });
       if (page === "logs")
@@ -244,6 +250,18 @@ function App() {
           : page === "settings"
             ? "settings"
             : page + "?" + q;
+      if (page === "logs") {
+        const result = await api(path);
+        if (
+          generation === sessionGeneration.current &&
+          requestGeneration === loadGeneration.current
+        ) {
+          setData(result.data);
+          setLogTotal(result.total);
+          setLogOptions(result.options || {});
+        }
+        return;
+      }
       const settingsPromise = isAdmin ? api("settings") : Promise.resolve({});
       const [catalog, result, configuration] = await Promise.all([
         fetchAllModels(api),
@@ -261,10 +279,6 @@ function App() {
       else if (page === "settings") setSettings(result);
       else {
         setData(result.data);
-        if (page === "logs") {
-          setLogTotal(result.total);
-          setLogOptions(result.options || {});
-        }
       }
     } catch (e) {
       if (
@@ -286,6 +300,25 @@ function App() {
       loadGeneration.current++;
     };
   }, [session, page, offset, logFilters]);
+  liveLogLoad.current = () => load(true);
+  useEffect(() => {
+    if (!session || page !== "logs" || !logAutoRefresh) return;
+    const generation = sessionGeneration.current;
+    return subscribeRequestLogs({
+      onRefresh: () => liveLogLoad.current(),
+      onStatus: setLogLiveStatus,
+      onUnauthorized: signOut,
+      onError: () => {
+        void api("session").catch((e) => {
+          if (
+            generation === sessionGeneration.current &&
+            e instanceof Error &&
+            e.message === "unauthorized"
+          ) signOut();
+        });
+      },
+    });
+  }, [session, page, logAutoRefresh]);
   async function action(id: string, name: string) {
     setBusy(true);
     setError("");
@@ -796,6 +829,31 @@ function App() {
               </p>
             </div>
             <div className="heading-actions">
+              {page === "logs" && (
+                <div className="log-live-control">
+                  <button
+                    type="button"
+                    className={`upstream-toggle ${logAutoRefresh ? "is-on" : ""}`}
+                    aria-pressed={logAutoRefresh}
+                    onClick={() => setLogAutoRefresh(!logAutoRefresh)}
+                  >
+                    <span aria-hidden="true" />
+                    {t("logAutoRefresh")}
+                  </button>
+                  <small className="muted" role="status">
+                    {t(
+                      !logAutoRefresh
+                        ? "logLivePaused"
+                        : {
+                            live: "logLiveConnected",
+                            connecting: "logLiveConnecting",
+                            reconnecting: "logLiveReconnecting",
+                            unavailable: "logLiveUnavailable",
+                          }[logLiveStatus] || "logLiveConnecting"
+                    )}
+                  </small>
+                </div>
+              )}
               {!["pricing", "users", "account", "oauth_accounts"].includes(page) && (
                 <button
                   className="secondary"

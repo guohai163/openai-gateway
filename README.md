@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.21.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.21.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.21.0`。
+最新版本：[v1.22.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.22.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.22.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -325,6 +325,8 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 升级迁移 `008_request_costs_and_key_reveal.sql` 自动增加私有 Key 密文、缓存写入单价和调用价格快照字段。更新镜像后请到“模型定价”手动同步一次，补全新增写入单价；保留原 `MASTER_KEY` 和数据库卷。
 
 ## 调度、额度与统计
+
+- 调用记录默认开启自动刷新，通过 SSE 接收新日志通知并按当前筛选条件、页码更新列表和总数；可用页面顶部开关暂停。短时间内的通知合并刷新，断线后自动重连并补查当前列表。普通用户仅接收自己私有 Key 的推理日志通知，管理员可接收全部日志。新增迁移 `020_request_log_notifications.sql`，使用 PostgreSQL `LISTEN/NOTIFY` 支持多个网关实例，每个实例在有订阅时共用一个独立监听连接；离开页面或暂停后释放订阅。反向代理需关闭响应缓冲，仓库 Nginx 示例已包含该配置。
 
 - 管理员可在私钥新建/编辑页设置“上游调度”，默认负载轮询全部可用上游，也可勾选固定账号池（最多64个）。普通用户不能读取或修改上游账号池，但其请求会执行管理员保存的策略；私钥模型列表也限定在所选池内。
 - 主备模式至少选择2个账号，可调整顺序；从保存模式/账号池变更时起，将24小时均分，2个每12小时、3个每8小时、4个每6小时切换计划主号。轮换锚点保存在数据库，重启或修改无关配置不会重置；停用账号不改变周期和顺序。主号不可用时按顺序选择下一个可用账号；主号恢复后同一时段可重新优先使用它。
