@@ -165,7 +165,9 @@ func TestBackupEnvironmentPreservesComposeCredentials(t *testing.T) {
 			Environment map[string]string `json:"environment"`
 		} `json:"services"`
 	}
-	if err := json.Unmarshal(output, &parsed); err != nil || parsed.Services["gateway"].Environment["S3_SECRET_ACCESS_KEY"] != a.Config.S3.SecretKey {
+	// Compose config escapes dollars in its rendered output so that it can be
+	// parsed again; the container receives one dollar for each escaped pair.
+	if err := json.Unmarshal(output, &parsed); err != nil || strings.ReplaceAll(parsed.Services["gateway"].Environment["S3_SECRET_ACCESS_KEY"], "$$", "$") != a.Config.S3.SecretKey {
 		t.Fatalf("Compose changed the synthetic test credential: got %q, want %q (decode: %v)", parsed.Services["gateway"].Environment["S3_SECRET_ACCESS_KEY"], a.Config.S3.SecretKey, err)
 	}
 }

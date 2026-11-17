@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.24.0 - 2026-11-17
+## v1.24.1 - 2026-11-17
 
 ### Added
 
@@ -18,7 +18,7 @@
 
 - 启动时自动执行 `023_outbound_proxies.sql` 和 `024_scheduled_backups.sql`。升级前备份数据库并保留原 `MASTER_KEY`。
 - 配置 S3 后在系统设置中保存定时备份密码；密码需要另行保管。备份不包含 S3 请求 JSON，异地恢复需要继续访问或另行复制这些对象。
-- 固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.24.0`；详细恢复步骤见仓库恢复说明。
+- 固定版本镜像：`ghcr.io/guohai163/openai-gateway:1.24.1`；详细恢复步骤见仓库恢复说明。
 
 ## v1.23.0 - 2026-11-17
 
