@@ -1,5 +1,13 @@
 export const expiryDayOptions = [30, 90, 120];
 
+export function parseConcurrencyInput(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return null;
+  if (!/^(0|[1-9][0-9]{0,3})$/.test(text) || Number(text) > 1000)
+    throw Error("invalid_concurrency_limit");
+  return Number(text);
+}
+
 export function normalizeModelSelection(models) {
   return models.includes("*") ? ["*"] : [...new Set(models)];
 }

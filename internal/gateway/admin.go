@@ -16,21 +16,22 @@ import (
 )
 
 type resourceInput struct {
-	Name            string       `json:"name"`
-	Key             string       `json:"key"`
-	Platform        string       `json:"platform"`
-	ProbeModel      *string      `json:"probe_model"`
-	Enabled         *bool        `json:"enabled"`
-	Models          *[]string    `json:"models"`
-	CIDRs           *[]string    `json:"cidrs"`
-	ExpiresInDays   *int         `json:"expires_in_days"`
-	StoreInput      *bool        `json:"store_input"`
-	StoreOutput     *bool        `json:"store_output"`
-	RoutingMode     *string      `json:"routing_mode"`
-	UpstreamKeyIDs  *[]string    `json:"upstream_key_ids"`
-	PromptCacheMode *string      `json:"prompt_cache_mode"`
-	PromptCacheTTL  *string      `json:"prompt_cache_ttl"`
-	SpendLimits     *spendLimits `json:"spend_limits"`
+	Name                  string          `json:"name"`
+	Key                   string          `json:"key"`
+	Platform              string          `json:"platform"`
+	ProbeModel            *string         `json:"probe_model"`
+	Enabled               *bool           `json:"enabled"`
+	Models                *[]string       `json:"models"`
+	CIDRs                 *[]string       `json:"cidrs"`
+	ExpiresInDays         *int            `json:"expires_in_days"`
+	StoreInput            *bool           `json:"store_input"`
+	StoreOutput           *bool           `json:"store_output"`
+	RoutingMode           *string         `json:"routing_mode"`
+	UpstreamKeyIDs        *[]string       `json:"upstream_key_ids"`
+	PromptCacheMode       *string         `json:"prompt_cache_mode"`
+	PromptCacheTTL        *string         `json:"prompt_cache_ttl"`
+	SpendLimits           *spendLimits    `json:"spend_limits"`
+	MaxConcurrentRequests json.RawMessage `json:"max_concurrent_requests,omitempty"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -362,13 +363,19 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
 		}
 	case "gateway_keys":
-		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil) {
+		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil || len(in.MaxConcurrentRequests) != 0) {
 			writeError(w, 403, "forbidden")
 			return
 		}
 		if !a.ownsKey(r, id) && !create {
 			writeError(w, 404, "not_found")
 			return
+		}
+		if len(in.MaxConcurrentRequests) != 0 {
+			if _, err := parseConcurrencyLimit(in.MaxConcurrentRequests); err != nil {
+				writeError(w, 400, "invalid_concurrency_limit")
+				return
+			}
 		}
 		if (in.StoreInput != nil && *in.StoreInput || in.StoreOutput != nil && *in.StoreOutput) && a.Storage == nil {
 			writeError(w, 400, "storage_not_configured")
@@ -555,6 +562,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	}
 	if e == nil && resource == "gateway_keys" && in.SpendLimits != nil {
 		_, e = keyTx.Exec(ctx, "UPDATE gateway_keys SET spend_limits=$2 WHERE id=$1 AND deleted_at IS NULL", id, *in.SpendLimits)
+	}
+	if e == nil && resource == "gateway_keys" && len(in.MaxConcurrentRequests) != 0 {
+		limit, _ := parseConcurrencyLimit(in.MaxConcurrentRequests)
+		_, e = keyTx.Exec(ctx, "UPDATE gateway_keys SET max_concurrent_requests=$2 WHERE id=$1 AND deleted_at IS NULL", id, limit)
 	}
 	if e == nil && keyTx != nil {
 		e = keyTx.Commit(ctx)

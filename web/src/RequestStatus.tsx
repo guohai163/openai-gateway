@@ -32,7 +32,27 @@ export function RequestStatus({
             <code>{error.param}</code>
           </p>
         )}
-        <p>{error?.message || t("requestErrorMessageUnavailable")}</p>
+        <p>
+          {row.kind === "anomaly"
+            ? t(`anomaly_${row.error_code}`)
+            : error?.message || t("requestErrorMessageUnavailable")}
+        </p>
+        {row.kind === "anomaly" && (
+          <>
+            <p>
+              <strong>{t("credential_fingerprint")}: </strong>
+              <code>{row.credential_fingerprint || "—"}</code>
+            </p>
+            <p>
+              <strong>{t("user_agent")}: </strong>
+              {row.user_agent || "—"}
+            </p>
+            <p>
+              <strong>{t("request_uuid")}: </strong>
+              <code>{row.request_uuid}</code>
+            </p>
+          </>
+        )}
         {row.pricing_snapshot?.prompt_cache_policy && (
           <p>
             {t("keyPromptCache")}: {row.pricing_snapshot.prompt_cache_policy}

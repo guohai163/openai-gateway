@@ -4,7 +4,21 @@ import {
   fetchAllModels,
   normalizeModelSelection,
   toggleModelSelection,
+  parseConcurrencyInput,
 } from "../src/gateway-key-form.mjs";
+
+test("concurrency form keeps automatic, unlimited and explicit limits distinct", () => {
+  assert.equal(parseConcurrencyInput(""), null);
+  assert.equal(parseConcurrencyInput("  "), null);
+  assert.equal(parseConcurrencyInput("0"), 0);
+  assert.equal(parseConcurrencyInput("5"), 5);
+  assert.equal(parseConcurrencyInput("1000"), 1000);
+  for (const value of ["-1", "1.5", "1e2", "1001", "NaN"])
+    assert.throws(
+      () => parseConcurrencyInput(value),
+      /invalid_concurrency_limit/,
+    );
+});
 
 test("model options include every page and deduplicate overlapping upstream catalogs", async () => {
   const rows = Array.from({ length: 735 }, (_, i) => ({ model: `model-${i}` }));

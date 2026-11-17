@@ -2463,6 +2463,15 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
   color: var(--text);
   border-bottom-color: var(--primary);
 }
+.log-kind-tabs {
+  margin-bottom: 0;
+}
+.log-anomaly-hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
 .log-filter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

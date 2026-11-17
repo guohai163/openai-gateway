@@ -9,7 +9,7 @@ function readPreference(key: string, admin: boolean) {
   try {
     return normalizeLogColumnPreference(
       JSON.parse(localStorage.getItem(key) || "null"),
-      admin
+      admin,
     );
   } catch {
     return null;
@@ -19,13 +19,14 @@ function readPreference(key: string, admin: boolean) {
 export function useLogColumns(
   admin: boolean,
   userID: string,
-  enabled: boolean
+  enabled: boolean,
+  anomaly = false,
 ) {
   const storageKey = `openai-log-columns:v1:${userID}:${
     admin ? "admin" : "user"
-  }`;
+  }${anomaly ? ":anomaly" : ""}`;
   const [saved, setSaved] = useState<{ key: string; columns: string[] | null }>(
-    () => ({ key: storageKey, columns: readPreference(storageKey, admin) })
+    () => ({ key: storageKey, columns: readPreference(storageKey, admin) }),
   );
   const [width, setWidth] = useState(320);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +51,7 @@ export function useLogColumns(
     saved.key === storageKey
       ? normalizeLogColumnPreference(saved.columns, admin)
       : null;
-  const columns = preference || defaultLogColumns(width, admin);
+  const columns = preference || defaultLogColumns(width, admin, anomaly);
   const onChange = (next: string[] | null) => {
     const normalized = normalizeLogColumnPreference(next, admin);
     setSaved({ key: storageKey, columns: normalized });
@@ -113,7 +114,7 @@ export function LogColumnPicker({
                     onChange(
                       event.target.checked
                         ? [...columns, column]
-                        : columns.filter((item) => item !== column)
+                        : columns.filter((item) => item !== column),
                     )
                   }
                 />

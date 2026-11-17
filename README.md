@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.22.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.22.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.22.0`。
+最新版本：[v1.23.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.23.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.23.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -22,6 +22,14 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 - AES-256-GCM 加密上游凭据、私有 Key 和 TOTP 密钥；私有 Key 另存 SHA-256 哈希用于认证，管理员或所属用户可回显；密码 bcrypt；服务端会话、CSRF、登录限速与 OTP 防重放。
 - 调用记录展示输入/输出 Token 与估算费用、缓存命中与缓存用量；价格快照随记录保存。
 - 中英文自动识别、手动切换并记住选择；亮色、暗色主题默认跟随系统，也可手动选择并记住。默认只记录调用元数据；配置 S3 后可按私钥选择存储输入/输出 JSON。
+
+## 异常请求日志
+
+管理员在 **调用记录 → 异常请求** 查看 `/v1/` 鉴权阶段被拦截的请求：IP 不在白名单、密钥错误或缺失、密钥停用或过期、所属用户停用，以及来源 IP 无法验证。展示时间、来源 IP、HTTP 状态、拦截原因、关联密钥与用户、请求方法/路径、User-Agent 和请求 UUID，支持实时刷新及按原因、用户、密钥、时间筛选，也可搜索 IP 或凭据指纹。
+
+“IP 不在白名单（密钥匹配）”说明请求持有正确密钥，可用于核对用户是否更换 IP，或排查密钥是否泄漏；错误密钥无法关联到具体用户。凭据指纹使用主密钥参与的 HMAC 摘要，同一凭据可关联重复尝试，不保存密钥原文、认证头、Cookie、查询参数或请求正文。缺失或超长凭据不生成指纹；来源 IP 解析失败时显示为空，不猜测地址。主密钥更换后指纹会变化。
+
+异常日志仅管理员可见，保存在现有日志表中，不计入模型调用量、Token 用量和消费，也不创建 S3 正文归档。升级时自动执行 `021_anomalous_requests.sql`；仅记录升级后发生的异常请求。
 
 ## 上游密钥请求测试
 
@@ -473,8 +481,8 @@ docker compose up -d gateway
 
 - 按 `REPORT_TIMEZONE` 的自然日和自然周计算，每日 00:00、每周一 00:00 重置；修改名称、续期、轮换凭据或重启网关不会清空消费记录。启用限额时，当期已有消费也参与计算。
 - 达到任一限额（包含相等）后，在请求发往上游前返回 HTTP 429，错误码为 `daily_spend_limit_exceeded` / `weekly_spend_limit_exceeded`，带币种、周期、`reset_at` 和 `Retry-After`。模型列表、已有 Response 的读取、取消和删除仍可使用。
-- 启用任意限额后，同一私钥同时只放行一笔待结算的推理请求；并行请求立即返回 `budget_request_in_progress`（429）。预留状态存入 PostgreSQL，跨进程共享；不同私钥独立。Chat 流式请求自动要求上游返回用量，费用沿用现有快照计价与 Responses 去重逻辑；失败后切换上游不重复创建预留。
-- **单笔请求的费用在完成后才可确定，最后一笔可能使累计金额超过限额。** 此功能按本网关保存的估算费用拦截，不是上游官方账单的绝对硬封顶。预算密钥不支持 `background: true` 的 Responses（400，`budget_background_not_supported`）。
+- 启用任意限额后，默认同一私钥同时只放行一笔待结算的推理请求；管理员可在“并发限制”中修改。保留自动规则时，并行请求立即返回 `budget_request_in_progress`（429）。预留状态存入 PostgreSQL，跨进程共享；不同私钥独立。Chat 流式请求自动要求上游返回用量，费用沿用现有快照计价与 Responses 去重逻辑；失败后切换上游不重复创建预留。
+- **单笔请求的费用在完成后才可确定，已放行的请求可能使累计金额超过限额，并发越高，可能超出的金额越多。** 此功能按本网关保存的估算费用拦截，不是上游官方账单的绝对硬封顶。预算密钥不支持 `background: true` 的 Responses（400，`budget_background_not_supported`）。
 - 限额仅按已知消费金额累计；缺少完整价格或用量、连接/流中断等产生的未知费用单独显示数量，不作为零费用写入，也不会因此暂停后续调用。请求完成后释放并发预留，进程异常退出留下的预留在请求超时后失效；旧版本因未知费用保留至周期结束的预留会自动忽略，无须等到下周或清理数据库。正常上游 4xx 拒绝和已去重用量不消耗预算；恢复探测不参与预算。
 
 `POST/PATCH /admin/api/gateway_keys[/ID]` 支持管理员字段 `spend_limits`，金额使用非负十进制**字符串**（最多 12 位整数、6 位小数）。省略字段保留原配置，传 `{}` 清除限额；传入对象替换整套限额。例：
@@ -484,6 +492,18 @@ docker compose up -d gateway
 ```
 
 列表返回 `spend_limits`、`budget_usage`（分币种的 `daily` / `weekly` 金额和未知费用数量）、`budget_timezone`、`budget_day_reset_at`、`budget_week_reset_at`。升级启动自动执行 `016_key_spend_limits.sql`，保留数据库卷与 `MASTER_KEY`。
+
+## 私有 Key 并发限制
+
+管理员在 **私有密钥 → 新增/编辑 → 并发限制** 设置每个密钥的 **最大并发请求数**，列表展示实际生效的上限。普通用户可以查看所属密钥的上限，不能修改。
+
+- 填写 `1`～`1000` 设置并发上限，`0` 表示不限并发；留空为自动规则：有日/周消费限额时为 `1`，否则不限并发。已有密钥升级后保留原来的自动行为。
+- 限制新发起的 Chat Completions、Responses、Embeddings、图片生成/编辑等推理 HTTP 请求。流式请求从放行到结束占用一个名额；同一请求的上游重试共用名额。模型列表、已有 Response 的读取/取消/删除不占名额；上游后台任务在 HTTP 返回后不继续占用名额。
+- 达到显式设置的上限立即返回 HTTP 429，错误码 `concurrency_limit_exceeded`，错误对象包含 `max_concurrent_requests`、`active_requests`，并附 `Retry-After: 1`。上游平台自己的 429 限流仍然可能发生。
+- 预留状态存入 PostgreSQL，多个进程共用每个密钥的名额。请求结束、失败或客户端断开后释放；进程异常退出留下的名额在请求超时加一分钟后失效。修改设置影响后续请求，不中断正在执行的请求；降低上限时等待已放行请求结束，之后恢复放行。从不限模式开启限制时，之前未受限的请求继续执行。
+- 并发限制与消费限额分别检查；调高或取消并发限制不会清除已消费金额。多笔已放行请求可能在完成后共同超过剩余消费额度。
+
+管理员接口 `POST/PATCH /admin/api/gateway_keys[/ID]` 接受 `max_concurrent_requests`：整数 `0`～`1000`，`null` 恢复自动规则，省略字段保留已有设置。例如 `{"max_concurrent_requests":5}`。列表返回配置值、`effective_max_concurrent_requests`（实际生效上限，`0` 为不限）及 `active_requests`（受控请求在查询时仍有效的名额数）。升级启动自动执行 `022_key_concurrency.sql`，保留正在执行请求的预留；升级时使用同一新版运行所有网关实例。
 
 ## 可选 S3 请求 JSON 存储
 

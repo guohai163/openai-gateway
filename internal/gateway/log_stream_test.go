@@ -84,6 +84,15 @@ func TestRequestLogNotificationsCommitScopeAndInstances(t *testing.T) {
 	logEvent(t, remote, "logs")
 	noLogEvent(t, alice)
 	noLogEvent(t, bob)
+	for _, key := range []any{nil, "g1"} {
+		if _, err := a.DB.Exec(ctx, insertStreamLog, "anomaly-"+newID(), key, "anomaly"); err != nil {
+			t.Fatal(err)
+		}
+		logEvent(t, admin, "logs")
+		logEvent(t, remote, "logs")
+		noLogEvent(t, alice)
+		noLogEvent(t, bob)
+	}
 }
 
 func TestRequestLogListenerReconnect(t *testing.T) {

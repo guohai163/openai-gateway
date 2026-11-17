@@ -100,6 +100,25 @@ func amountReached(spent, limit string) bool {
 type keyBudgetGuard struct {
 	app              *App
 	keyID, requestID string
+	budgeted         bool
+}
+
+func parseConcurrencyLimit(raw json.RawMessage) (*int, error) {
+	var limit *int
+	if err := json.Unmarshal(raw, &limit); err != nil || (limit != nil && (*limit < 0 || *limit > 1000)) {
+		return nil, errors.New("invalid_concurrency_limit")
+	}
+	return limit, nil
+}
+
+func effectiveConcurrencyLimit(configured *int, budgeted bool) int {
+	if configured != nil {
+		return *configured
+	}
+	if budgeted {
+		return 1
+	}
+	return 0
 }
 
 func budgetStreamUsage(body []byte) []byte {
@@ -122,9 +141,9 @@ func budgetStreamUsage(body []byte) []byte {
 	return result
 }
 
-// Short row locks make admission atomic across processes. Budgeted keys allow
-// one unsettled call at a time; parallel calls fail immediately instead of
-// all observing the same balance. No database connection stays reserved.
+// Short row locks make admission and per-key limits atomic across processes.
+// Reservations cover the whole HTTP call, including streaming and retries.
+// No database connection stays reserved during inference.
 func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k GatewayKey, background bool) (*keyBudgetGuard, bool) {
 	ctx := r.Context()
 	tx, err := a.DB.Begin(ctx)
@@ -134,22 +153,19 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 	}
 	defer tx.Rollback(ctx)
 	var limits spendLimits
-	err = tx.QueryRow(ctx, `SELECT spend_limits FROM gateway_keys WHERE id=$1 AND enabled AND deleted_at IS NULL FOR UPDATE`, k.ID).Scan(&limits)
+	var configured *int
+	err = tx.QueryRow(ctx, `SELECT spend_limits,max_concurrent_requests FROM gateway_keys WHERE id=$1 AND enabled AND deleted_at IS NULL FOR UPDATE`, k.ID).Scan(&limits, &configured)
 	if err != nil {
 		writeError(w, 503, "database_unavailable")
 		return nil, false
 	}
-	if len(limits) == 0 {
+	budgeted := len(limits) > 0
+	maxConcurrent := effectiveConcurrencyLimit(configured, budgeted)
+	if !budgeted && maxConcurrent == 0 {
 		return nil, true
 	}
-	if background {
+	if background && budgeted {
 		writeError(w, 400, "budget_background_not_supported")
-		return nil, false
-	}
-	p := a.budgetPeriods(time.Now())
-	usage, err := loadBudgetUsage(ctx, tx, k.ID, p)
-	if err != nil {
-		writeError(w, 503, "database_unavailable")
 		return nil, false
 	}
 	deny := func(code, currency, period string, reset time.Time) (*keyBudgetGuard, bool) {
@@ -160,24 +176,45 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 		}})
 		return nil, false
 	}
-	for _, currency := range []string{"USD", "CNY"} {
-		limit, used := limits[currency], usage[currency]
-		if amountReached(used.Daily, limit.Daily) {
-			return deny("daily_spend_limit_exceeded", currency, "daily", p.DayEnd)
+	if budgeted {
+		p := a.budgetPeriods(time.Now())
+		usage, err := loadBudgetUsage(ctx, tx, k.ID, p)
+		if err != nil {
+			writeError(w, 503, "database_unavailable")
+			return nil, false
 		}
-		if amountReached(used.Weekly, limit.Weekly) {
-			return deny("weekly_spend_limit_exceeded", currency, "weekly", p.WeekEnd)
+		for _, currency := range []string{"USD", "CNY"} {
+			limit, used := limits[currency], usage[currency]
+			if amountReached(used.Daily, limit.Daily) {
+				return deny("daily_spend_limit_exceeded", currency, "daily", p.DayEnd)
+			}
+			if amountReached(used.Weekly, limit.Weekly) {
+				return deny("weekly_spend_limit_exceeded", currency, "weekly", p.WeekEnd)
+			}
 		}
 	}
-	var active time.Time
 	// Old releases retained unknown-cost holds until the budget period ended.
 	// Only an active request can block admission now; ignore those old holds.
-	err = tx.QueryRow(ctx, `SELECT active_until FROM gateway_budget_holds WHERE gateway_key_id=$1 AND active_until>now()`, k.ID).Scan(&active)
-	if err == nil {
-		return deny("budget_request_in_progress", "", "", time.Now().Add(time.Second))
-	}
-	if err != pgx.ErrNoRows {
+	if _, err = tx.Exec(ctx, `DELETE FROM gateway_budget_holds WHERE gateway_key_id=$1 AND active_until<=now()`, k.ID); err != nil {
 		writeError(w, 503, "database_unavailable")
+		return nil, false
+	}
+	var active int
+	err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_budget_holds WHERE gateway_key_id=$1 AND active_until>now()`, k.ID).Scan(&active)
+	if err != nil {
+		writeError(w, 503, "database_unavailable")
+		return nil, false
+	}
+	if maxConcurrent > 0 && active >= maxConcurrent {
+		code := "concurrency_limit_exceeded"
+		if configured == nil && budgeted {
+			code = "budget_request_in_progress"
+		}
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, 429, map[string]any{"error": map[string]any{
+			"message": code, "type": "gateway_error", "code": code, "param": nil,
+			"max_concurrent_requests": maxConcurrent, "active_requests": active,
+		}})
 		return nil, false
 	}
 	timeout := a.Config.RequestTimeout
@@ -185,8 +222,7 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 		timeout = 10 * time.Minute
 	}
 	activeUntil := time.Now().Add(timeout + time.Minute)
-	_, err = tx.Exec(ctx, `INSERT INTO gateway_budget_holds(gateway_key_id,request_uuid,expires_at,active_until) VALUES($1,$2,$3,$3)
- ON CONFLICT(gateway_key_id) DO UPDATE SET request_uuid=$2,expires_at=$3,active_until=$3`, k.ID, k.RequestUUID, activeUntil)
+	_, err = tx.Exec(ctx, `INSERT INTO gateway_budget_holds(gateway_key_id,request_uuid,expires_at,active_until) VALUES($1,$2,$3,$3)`, k.ID, k.RequestUUID, activeUntil)
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
@@ -194,7 +230,7 @@ func (a *App) acquireKeyBudget(w http.ResponseWriter, r *http.Request, k Gateway
 		writeError(w, 503, "database_unavailable")
 		return nil, false
 	}
-	return &keyBudgetGuard{app: a, keyID: k.ID, requestID: k.RequestUUID}, true
+	return &keyBudgetGuard{app: a, keyID: k.ID, requestID: k.RequestUUID, budgeted: budgeted}, true
 }
 
 func (g *keyBudgetGuard) finish() {

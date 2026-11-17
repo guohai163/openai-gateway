@@ -156,7 +156,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 			r = r.WithContext(ctx)
-			if path == "/v1/chat/completions" {
+			if budget.budgeted && path == "/v1/chat/completions" {
 				body = budgetStreamUsage(body)
 			}
 		}

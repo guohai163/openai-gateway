@@ -24,14 +24,36 @@ test("automatic layout progressively adds main columns using the container width
 });
 
 test("ordinary users cannot select admin columns including saved preferences", () => {
-  for (const column of ["owner_email", "upstream_name", "archive_status"]) {
+  for (const column of [
+    "owner_email",
+    "upstream_name",
+    "archive_status",
+    "credential_fingerprint",
+  ]) {
     assert.ok(!availableLogColumns(false).includes(column));
     assert.ok(!defaultLogColumns(2000, false).includes(column));
     assert.equal(normalizeLogColumnPreference([column], false), null);
   }
   assert.deepEqual(
     normalizeLogColumnPreference(["model", "archive_status", "status"], false),
-    ["model", "status"]
+    ["model", "status"],
+  );
+});
+
+test("anomaly layout prioritizes source IP and rejection reason over usage", () => {
+  for (const width of [320, 640, 900, 1200, 2000]) {
+    const columns = defaultLogColumns(width, true, true);
+    assert.ok(columns.includes("ip"));
+    assert.ok(columns.includes("error_code"));
+    assert.ok(!columns.includes("request_cost"));
+    assert.ok(!columns.includes("token_usage"));
+  }
+  assert.ok(
+    defaultLogColumns(1200, true, true).includes("credential_fingerprint"),
+  );
+  assert.deepEqual(
+    defaultLogColumns(1200, false, true),
+    defaultLogColumns(1200, false),
   );
 });
 

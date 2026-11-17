@@ -32,7 +32,7 @@ func (a *App) lookupLogIP(w http.ResponseWriter, r *http.Request, id string) {
 	// Derive the IP from a visible log row, never from a caller-supplied URL/IP.
 	me := actor(r)
 	var address string
-	err := a.DB.QueryRow(r.Context(), `SELECT host(l.ip) FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id WHERE l.id=$1 AND ($2::boolean OR g.user_id=$3)`, id, me.Role == "admin", me.ID).Scan(&address)
+	err := a.DB.QueryRow(r.Context(), `SELECT coalesce(host(l.ip),'') FROM request_logs l LEFT JOIN gateway_keys g ON g.id=l.gateway_key_id WHERE l.id=$1 AND ($2::boolean OR (g.user_id=$3 AND l.kind='inference'))`, id, me.Role == "admin", me.ID).Scan(&address)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "not_found")
 		return

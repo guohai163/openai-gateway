@@ -3,11 +3,13 @@ package gateway
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"net/netip"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -236,23 +238,48 @@ func (a *App) adminAuth(next http.Handler) http.Handler {
 }
 func (a *App) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		auth := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(auth, "Bearer ")
 		// Authenticate by the stored hash, independent of historical display prefixes.
 		if token == auth || token == "" || len(token) > 256 {
+			reason := "invalid_api_key"
+			if auth == "" || auth == "Bearer " {
+				reason = "missing_api_key"
+			}
+			a.logAnomalousRequest(w, r, "", token, 401, reason, start)
 			writeError(w, 401, "invalid_api_key")
 			return
 		}
 		var k GatewayKey
 		var cidrs []string
 		var canReveal bool
-		e := a.DB.QueryRow(r.Context(), `SELECT g.id,g.models,ARRAY(SELECT x::text FROM unnest(g.cidrs) x),g.secret IS NOT NULL,g.name,g.store_input,g.store_output,u.role='user',g.routing_mode,g.upstream_key_ids,g.routing_started_at,g.prompt_cache_mode,g.prompt_cache_ttl FROM gateway_keys g JOIN users u ON u.id=g.user_id WHERE g.token_hash=$1 AND g.enabled AND u.enabled AND g.deleted_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal, &k.Name, &k.StoreInput, &k.StoreOutput, &k.PricedOnly, &k.RoutingMode, &k.UpstreamKeyIDs, &k.RoutingStartedAt, &k.PromptCacheMode, &k.PromptCacheTTL)
+		var keyEnabled, userEnabled, expired bool
+		e := a.DB.QueryRow(r.Context(), `SELECT g.id,g.models,ARRAY(SELECT x::text FROM unnest(g.cidrs) x),g.secret IS NOT NULL,g.name,g.store_input,g.store_output,u.role='user',g.routing_mode,g.upstream_key_ids,g.routing_started_at,g.prompt_cache_mode,g.prompt_cache_ttl,g.enabled,u.enabled,coalesce(g.expires_at<=now(),false) FROM gateway_keys g JOIN users u ON u.id=g.user_id WHERE g.token_hash=$1 AND g.deleted_at IS NULL`, hash(token)).Scan(&k.ID, &k.Models, &cidrs, &canReveal, &k.Name, &k.StoreInput, &k.StoreOutput, &k.PricedOnly, &k.RoutingMode, &k.UpstreamKeyIDs, &k.RoutingStartedAt, &k.PromptCacheMode, &k.PromptCacheTTL, &keyEnabled, &userEnabled, &expired)
 		if e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				a.logAnomalousRequest(w, r, "", token, 401, "invalid_api_key", start)
+			}
+			writeError(w, 401, "invalid_api_key")
+			return
+		}
+		reason := ""
+		switch {
+		case !userEnabled:
+			reason = "user_disabled"
+		case !keyEnabled:
+			reason = "key_disabled"
+		case expired:
+			reason = "key_expired"
+		}
+		if reason != "" {
+			a.logAnomalousRequest(w, r, k.ID, token, 401, reason, start)
 			writeError(w, 401, "invalid_api_key")
 			return
 		}
 		ip, e := clientIP(r, a.Config.TrustedProxies)
 		if e != nil {
+			a.logAnomalousRequest(w, r, k.ID, token, 403, "invalid_client_ip", start)
 			writeError(w, 403, "ip_not_allowed")
 			return
 		}
@@ -265,6 +292,7 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 			}
 		}
 		if !allowed {
+			a.logAnomalousRequest(w, r, k.ID, token, 403, "ip_not_allowed", start)
 			writeJSON(w, 403, map[string]any{"error": map[string]any{
 				"message": "ip_not_allowed", "type": "gateway_error", "param": nil,
 				"code": "ip_not_allowed", "client_ip": ip.String(),

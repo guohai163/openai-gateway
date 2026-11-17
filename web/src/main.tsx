@@ -30,7 +30,7 @@ import { formatDateTime as date } from "./date-time.mjs";
 import { ModelMultiSelect } from "./ModelMultiSelect";
 import { KeyUsageDialog } from "./KeyUsageDialog";
 import { IPAllowlistField } from "./IPAllowlistField";
-import { expiryDayOptions, fetchAllModels } from "./gateway-key-form.mjs";
+import { expiryDayOptions, fetchAllModels, parseConcurrencyInput } from "./gateway-key-form.mjs";
 import {
   readThemePreference,
   resolveTheme,
@@ -55,6 +55,7 @@ import { LoginForm } from "./LoginForm";
 import { KeyRoutingFields } from "./KeyRoutingFields";
 import { KeyCacheFields } from "./KeyCacheFields";
 import { KeyBudgetFields, KeyBudgetSummary } from "./KeyBudgetFields";
+import { KeyConcurrencyFields, KeyConcurrencySummary } from "./KeyConcurrencyFields";
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import { OAuthAccounts } from "./OAuthAccounts";
@@ -130,7 +131,6 @@ function App() {
     [settings, setSettings] = useState<Row>({});
   const [identity, setIdentity] = useState<Row>({});
   const isAdmin = identity.role === "admin";
-  const logColumns = useLogColumns(isAdmin, identity.id || "anonymous", page === "logs");
   const [models, setModels] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
@@ -153,6 +153,7 @@ function App() {
   const [logFilters, setLogFilters] = useState<LogFilterValues>({
     ...emptyLogFilters,
   });
+  const logColumns = useLogColumns(isAdmin, identity.id || "anonymous", page === "logs", logFilters.kind === "anomaly");
   const [logOptions, setLogOptions] = useState<LogFilterOptions>({});
   const [logTotal, setLogTotal] = useState(0);
   const [logAutoRefresh, setLogAutoRefresh] = useState(true);
@@ -367,6 +368,12 @@ function App() {
     input.enabled = input.enabled === "true";
     if (page === "gateway_keys") {
       if (isAdmin) {
+        try {
+          input.max_concurrent_requests = parseConcurrencyInput(input.max_concurrent_requests);
+        } catch {
+          setError("invalid_concurrency_limit");
+          return;
+        }
         input.spend_limits = {};
         for (const currency of ["USD", "CNY"]) {
           const limits: Row = {};
@@ -560,6 +567,7 @@ function App() {
       ...(isAdmin ? ["owner_email"] : []),
       "month_cost",
       "keyBudget",
+      "keyConcurrency",
       "models",
       "cidrs",
       ...(isAdmin ? ["keyRouting"] : []),
@@ -571,6 +579,7 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "keyConcurrency") return <KeyConcurrencySummary row={r} t={t} />;
     if (c === "keyBudget") return <KeyBudgetSummary row={r} t={t} locale={locale} />;
     if (c === "keyRouting") return <span>{t(r.routing_mode === "primary_backup" ? "routingPrimaryBackup" : "routingRoundRobin")}<small className="routing-summary">{r.upstream_key_ids?.length ? t("routingSelectedCount").replace("{count}", String(r.upstream_key_ids.length)) : t("routingAllUpstreams")}</small></span>;
     if (c === "enabled" && page === "upstream_keys") return <button type="button" role="switch" aria-checked={!!r.enabled} aria-label={`${t("enabled")} ${r.name}`} className={`upstream-toggle ${r.enabled ? "is-on" : ""}`} disabled={busy || loading} onClick={async () => {
@@ -618,13 +627,16 @@ function App() {
           <span>{t(expandedKey === r.id ? "lessDetails" : "moreDetails")}</span>
         </button>
       );
-    if (c === "request_uuid") return <code title={v}>{v || "—"}</code>;
+    if (c === "request_uuid" || c === "credential_fingerprint") return <code title={v}>{v || "—"}</code>;
+    if (r.kind === "anomaly" && c === "error_code") return <span title={v}>{t(`anomaly_${v}`)}</span>;
+    if (r.kind === "anomaly" && c === "endpoint") return <code>{r.method} {v}</code>;
     if (c === "archive_status")
       return r.input_status || r.output_status ? (
         <ArchiveDetails key={r.id} row={r} api={api} t={t} />
       ) : (
         "—"
       );
+    if (r.kind === "anomaly" && ["token_usage", "request_cost"].includes(c)) return "—";
     if (c === "token_usage")
       return <RequestTokens row={r} locale={locale} t={t} />;
     if (c === "request_cost")
@@ -1068,7 +1080,7 @@ function App() {
                   <thead>
                     <tr>
                       {columns[page]?.map((c) => (
-                        <th key={c} data-column={c}>{t(c)}</th>
+                        <th key={c} data-column={c}>{t(page === "logs" && logFilters.kind === "anomaly" && c === "error_code" ? "anomalyReason" : c)}</th>
                       ))}
                       {canAdd && (
                         <th className="actions-column">{t("actions")}</th>
@@ -1321,6 +1333,7 @@ function App() {
                 )}
                 {page === "gateway_keys" && (
                   <>
+                    {isAdmin && <KeyConcurrencyFields key={`concurrency-${modal.id || "new"}`} row={modal} t={t} />}
                     {isAdmin && <KeyBudgetFields key={`budget-${modal.id || "new"}`} row={modal} t={t} locale={locale} />}
                     {isAdmin && <KeyRoutingFields key={modal.id || "new"} row={modal} api={api} t={t} />}
                     {isAdmin && <KeyCacheFields key={`cache-${modal.id || "new"}`} row={modal} t={t} />}

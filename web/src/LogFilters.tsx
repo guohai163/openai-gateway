@@ -8,6 +8,7 @@ export type LogFilterValues = {
   upstream_key_id: string;
   gateway_key_id: string;
   kind: string;
+  error_code: string;
   status: string;
   start: string;
   end: string;
@@ -19,6 +20,7 @@ export const emptyLogFilters: LogFilterValues = {
   upstream_key_id: "",
   gateway_key_id: "",
   kind: "",
+  error_code: "",
   status: "",
   start: "",
   end: "",
@@ -66,7 +68,7 @@ export function LogFilters({
   const select = (
     field: "owner_id" | "upstream_key_id" | "gateway_key_id",
     label: string,
-    items: { id: string; name: string | null }[] = []
+    items: { id: string; name: string | null }[] = [],
   ) => (
     <label>
       {t(label)}
@@ -81,10 +83,47 @@ export function LogFilters({
     </label>
   );
   const active = (Object.keys(value) as (keyof LogFilterValues)[]).filter(
-    (key) => value[key]
+    (key) => value[key],
   );
   return (
     <div className="log-filter-panel">
+      {isAdmin && (
+        <>
+          <div
+            className="log-status-tabs log-kind-tabs"
+            role="group"
+            aria-label={t("kind")}
+          >
+            {[
+              ["", "logAllRecords"],
+              ["inference", "inference"],
+              ["probe", "probeKind"],
+              ["anomaly", "anomaly"],
+            ].map(([kind, label]) => (
+              <button
+                type="button"
+                key={kind}
+                aria-pressed={value.kind === kind}
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    kind,
+                    model: "",
+                    upstream_key_id: "",
+                    status: "",
+                    error_code: "",
+                  })
+                }
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
+          {value.kind === "anomaly" && (
+            <p className="log-anomaly-hint">{t("anomalyHint")}</p>
+          )}
+        </>
+      )}
       <div className="log-filter-heading">
         <button
           type="button"
@@ -176,7 +215,7 @@ export function LogFilters({
                     <option key={code} value={String(code)}>
                       {code}
                     </option>
-                  )
+                  ),
                 )}
               </select>
             </label>
@@ -190,6 +229,31 @@ export function LogFilters({
                   <option value="">{t("logAll")}</option>
                   <option value="inference">{t("inference")}</option>
                   <option value="probe">{t("probeKind")}</option>
+                  <option value="anomaly">{t("anomaly")}</option>
+                </select>
+              </label>
+            )}
+            {isAdmin && (
+              <label>
+                {t("anomalyReason")}
+                <select
+                  value={draft.error_code}
+                  onChange={(e) => set("error_code", e.target.value)}
+                >
+                  <option value="">{t("logAll")}</option>
+                  {[
+                    "ip_not_allowed",
+                    "invalid_api_key",
+                    "missing_api_key",
+                    "key_disabled",
+                    "key_expired",
+                    "user_disabled",
+                    "invalid_client_ip",
+                  ].map((reason) => (
+                    <option key={reason} value={reason}>
+                      {t(`anomaly_${reason}`)}
+                    </option>
+                  ))}
                 </select>
               </label>
             )}
@@ -201,7 +265,9 @@ export function LogFilters({
                 onChange={(e) =>
                   set(
                     "start",
-                    e.target.value ? new Date(e.target.value).toISOString() : ""
+                    e.target.value
+                      ? new Date(e.target.value).toISOString()
+                      : "",
                   )
                 }
               />
@@ -215,7 +281,9 @@ export function LogFilters({
                 onChange={(e) =>
                   set(
                     "end",
-                    e.target.value ? new Date(e.target.value).toISOString() : ""
+                    e.target.value
+                      ? new Date(e.target.value).toISOString()
+                      : "",
                   )
                 }
               />
@@ -257,6 +325,7 @@ export function LogFilters({
                 upstream_key_id: "upstream_name",
                 gateway_key_id: "gateway_name",
                 kind: "kind",
+                error_code: "anomalyReason",
                 status: "status",
                 start: "logStart",
                 end: "logEnd",
@@ -266,24 +335,27 @@ export function LogFilters({
                 key === "owner_id"
                   ? options.owners
                   : key === "upstream_key_id"
-                  ? options.upstreams
-                  : key === "gateway_key_id"
-                  ? options.keys
-                  : undefined;
+                    ? options.upstreams
+                    : key === "gateway_key_id"
+                      ? options.keys
+                      : undefined;
               const raw = value[key];
               const display =
                 key === "start" || key === "end"
                   ? formatDateTime(raw)
-                  : items?.find((item) => item.id === raw)?.name ||
-                    (
-                      {
-                        success: t("logSuccess"),
-                        failed: t("logFailed"),
-                        inference: t("inference"),
-                        probe: t("probeKind"),
-                      } as Record<string, string>
-                    )[raw] ||
-                    raw;
+                  : key === "error_code"
+                    ? t(`anomaly_${raw}`)
+                    : items?.find((item) => item.id === raw)?.name ||
+                      (
+                        {
+                          success: t("logSuccess"),
+                          failed: t("logFailed"),
+                          inference: t("inference"),
+                          probe: t("probeKind"),
+                          anomaly: t("anomaly"),
+                        } as Record<string, string>
+                      )[raw] ||
+                      raw;
               return (
                 <button
                   type="button"

@@ -23,9 +23,9 @@ func logFilterWhere(values url.Values, userID string, scoped bool) (string, []an
 		add("owner_id=$%d", userID)
 		conditions = append(conditions, "kind='inference'")
 	}
-	for _, field := range []string{"model", "gateway_key_id", "owner_id", "upstream_key_id", "kind"} {
+	for _, field := range []string{"model", "gateway_key_id", "owner_id", "upstream_key_id", "kind", "error_code"} {
 		if value := values.Get(field); value != "" {
-			if len(value) > 512 || (field == "kind" && value != "inference" && value != "probe") {
+			if len(value) > 512 || (field == "kind" && value != "inference" && value != "probe" && value != "anomaly") {
 				return "", nil, fmt.Errorf("invalid_log_filters")
 			}
 			add(field+"=$%d", value)
@@ -68,7 +68,7 @@ func logFilterWhere(values url.Values, userID string, scoped bool) (string, []an
 		}
 		search := "id,request_uuid::text,model,error_code,endpoint,ip::text,gateway_name"
 		if !scoped {
-			search += ",owner_email,upstream_name"
+			search += ",owner_email,upstream_name,credential_fingerprint,user_agent"
 		}
 		add("strpos(lower(concat_ws(' ',"+search+")),lower($%d))>0", q)
 	}

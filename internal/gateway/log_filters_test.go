@@ -20,7 +20,7 @@ func TestLogFilterValidationAndParameters(t *testing.T) {
 			t.Fatal("invalid filter accepted", query)
 		}
 	}
-	for _, query := range []string{"owner_id=bob", "upstream_key_id=k2", "kind=probe"} {
+	for _, query := range []string{"owner_id=bob", "upstream_key_id=k2", "kind=probe", "kind=anomaly"} {
 		v, _ := url.ParseQuery(query)
 		if _, _, err := logFilterWhere(v, "alice", true); err == nil || err.Error() != "forbidden" {
 			t.Fatal("privileged user filter accepted", query, err)
@@ -59,9 +59,9 @@ func TestRequestLogFiltersAcrossPagesAndUserIsolation(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		session testSession
-		query string
-		total int
-		rows int
+		query   string
+		total   int
+		rows    int
 	}{
 		{admin, "model=older-model&status=400&owner_id=alice&upstream_key_id=k1&gateway_key_id=g1&start=2026-11-01T00:01:00Z&end=2026-11-01T00:02:00Z", 1, 1},
 		{admin, "status=failed", 2, 2},
@@ -75,9 +75,11 @@ func TestRequestLogFiltersAcrossPagesAndUserIsolation(t *testing.T) {
 	} {
 		status, body := tc.session.call(t, "GET", "logs?"+tc.query, "")
 		var result struct {
-			Data []json.RawMessage `json:"data"`
-			Total int `json:"total"`
-			Options struct { Models []string `json:"models"` } `json:"options"`
+			Data    []json.RawMessage `json:"data"`
+			Total   int               `json:"total"`
+			Options struct {
+				Models []string `json:"models"`
+			} `json:"options"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil || status != 200 || result.Total != tc.total || len(result.Data) != tc.rows {
 			t.Fatalf("%s: %d %s %v", tc.query, status, body, err)
