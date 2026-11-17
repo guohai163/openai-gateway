@@ -46,9 +46,9 @@ func (a *App) runUpstreamTest(ctx context.Context, id, model string) (modelTestR
 	var allowed bool
 	// A manual test can diagnose disabled or blocked keys. It never enters the
 	// routing pool, changes recovery state, or retries with another credential.
-	if err := a.DB.QueryRow(ctx, `SELECT k.id,k.secret,k.platform,
+	if err := a.DB.QueryRow(ctx, `SELECT k.id,k.secret,k.platform,coalesce(k.proxy_id,''),
  EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$2)
- FROM upstream_keys k WHERE k.id=$1`, id, model).Scan(&u.ID, &u.Secret, &u.Platform, &allowed); err != nil {
+ FROM upstream_keys k WHERE k.id=$1`, id, model).Scan(&u.ID, &u.Secret, &u.Platform, &u.ProxyID, &allowed); err != nil {
 		return result, err
 	}
 	if !allowed {

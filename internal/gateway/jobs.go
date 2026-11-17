@@ -19,7 +19,7 @@ func (a *App) refreshModels(ctx context.Context, id string) (result error) {
 		}
 	}()
 	var u Upstream
-	e := a.DB.QueryRow(ctx, selectUpstream+"WHERE k.id=$1", id).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform)
+	e := a.DB.QueryRow(ctx, selectUpstream+"WHERE k.id=$1", id).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform, &u.ProxyID)
 	if e != nil {
 		return e
 	}
@@ -94,7 +94,7 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
  AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=k.probe_model)
  AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.scope='key' AND c.scope_id=k.id AND c.until_at>now() AND c.model IN ('*',k.probe_model))`
 	var u Upstream
-	if e := a.DB.QueryRow(ctx, selectUpstream+"WHERE "+where, id).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform); e != nil {
+	if e := a.DB.QueryRow(ctx, selectUpstream+"WHERE "+where, id).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform, &u.ProxyID); e != nil {
 		return e
 	}
 
@@ -105,7 +105,7 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
 		return e
 	}
 	start := time.Now()
-	resp, e := a.Client.Do(req)
+	resp, e := a.doOutbound(req)
 	if e != nil {
 		return errors.New("probe_connection_error")
 	}
@@ -136,6 +136,8 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
 }
 func (a *App) RunJobs(ctx context.Context) {
 	go a.runOAuthJobs(ctx)
+	go a.runBackupJobs(ctx)
+	go a.runArchiveMigrationJobs(ctx)
 	a.runCycle(ctx)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()

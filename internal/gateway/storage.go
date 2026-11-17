@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,20 @@ type ObjectStorage interface {
 	Put(context.Context, string, []byte) error
 	Get(context.Context, string) ([]byte, error)
 	Delete(context.Context, string) error
+}
+
+const keyJSONPrefix = "key-json-data/"
+const backupDataPrefix = "backup-data/"
+
+type storageObject struct {
+	Key      string
+	Modified time.Time
+}
+type siteObjectStorage interface {
+	PutFile(context.Context, string, string) error
+	List(context.Context, string) ([]storageObject, error)
+	CopyVerified(context.Context, string, string) error
+	Exists(context.Context, string) error
 }
 type s3Storage struct {
 	client *minio.Client
@@ -57,6 +72,57 @@ func (s *s3Storage) Get(ctx context.Context, key string) ([]byte, error) {
 }
 func (s *s3Storage) Delete(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
+}
+
+func (s *s3Storage) PutFile(ctx context.Context, key, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	_, err = s.client.PutObject(ctx, s.bucket, key, file, info.Size(), minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	return err
+}
+func (s *s3Storage) List(ctx context.Context, prefix string) ([]storageObject, error) {
+	objects := []storageObject{}
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if object.Err != nil {
+			return nil, object.Err
+		}
+		objects = append(objects, storageObject{Key: object.Key, Modified: object.LastModified})
+	}
+	return objects, ctx.Err()
+}
+func (s *s3Storage) CopyVerified(ctx context.Context, oldPath, newPath string) error {
+	info, err := s.client.StatObject(ctx, s.bucket, oldPath, minio.StatObjectOptions{})
+	if err != nil {
+		return err
+	}
+	_, err = s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: s.bucket, Object: newPath}, minio.CopySrcOptions{Bucket: s.bucket, Object: oldPath, MatchETag: info.ETag})
+	if err != nil {
+		return err
+	}
+	copied, err := s.client.StatObject(ctx, s.bucket, newPath, minio.StatObjectOptions{})
+	if err != nil {
+		return err
+	}
+	if copied.Size != info.Size || copied.ETag != info.ETag {
+		return errors.New("copied object verification failed")
+	}
+	return nil
+}
+func (s *s3Storage) Exists(ctx context.Context, key string) error {
+	_, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
+	return err
+}
+
+func missingStorageObject(err error) bool {
+	response := minio.ToErrorResponse(err)
+	return response.StatusCode == http.StatusNotFound || response.Code == "NoSuchKey" || response.Code == "NotFound"
 }
 
 func (a *App) storageTest(w http.ResponseWriter, r *http.Request) {

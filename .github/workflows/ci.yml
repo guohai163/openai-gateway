@@ -49,6 +49,13 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
+      - name: Prepare PostgreSQL 17 backup tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/pg-tools"
+          cp .github/scripts/pg-client.sh "$RUNNER_TEMP/pg-tools/pg_dump"
+          cp .github/scripts/pg-client.sh "$RUNNER_TEMP/pg-tools/pg_restore"
+          chmod +x "$RUNNER_TEMP/pg-tools/pg_dump" "$RUNNER_TEMP/pg-tools/pg_restore"
+          echo "$RUNNER_TEMP/pg-tools" >> "$GITHUB_PATH"
       - name: PostgreSQL integration and race tests
         run: go test -race -count=1 ./...
       - name: Go static analysis

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +33,21 @@ func fakeS3(t *testing.T) (*s3Storage, *sync.Map, *httptest.Server) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case "PUT":
+			if from := r.Header.Get("X-Amz-Copy-Source"); from != "" {
+				from, _ = url.PathUnescape(from)
+				if !strings.HasPrefix(from, "/") {
+					from = "/" + from
+				}
+				value, exists := objects.Load(from)
+				if !exists {
+					w.WriteHeader(404)
+					return
+				}
+				objects.Store(r.URL.Path, append([]byte{}, value.([]byte)...))
+				w.Header().Set("Content-Type", "application/xml")
+				fmt.Fprintf(w, `<CopyObjectResult><ETag>"test-etag"</ETag><LastModified>%s</LastModified></CopyObjectResult>`, time.Now().UTC().Format(time.RFC3339))
+				return
+			}
 			b, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Error(err)
@@ -46,6 +63,30 @@ func fakeS3(t *testing.T) (*s3Storage, *sync.Map, *httptest.Server) {
 			objects.Store(r.URL.Path, b)
 			w.WriteHeader(200)
 		case "GET":
+			if r.URL.Query().Get("list-type") == "2" {
+				type entry struct {
+					Key          string `xml:"Key"`
+					LastModified string `xml:"LastModified"`
+					Size         int    `xml:"Size"`
+					ETag         string `xml:"ETag"`
+				}
+				result := struct {
+					XMLName     xml.Name `xml:"ListBucketResult"`
+					Name        string   `xml:"Name"`
+					IsTruncated bool     `xml:"IsTruncated"`
+					Contents    []entry  `xml:"Contents"`
+				}{Name: "gateway-test"}
+				objects.Range(func(key, value any) bool {
+					relative := strings.TrimPrefix(key.(string), "/gateway-test/")
+					if strings.HasPrefix(relative, r.URL.Query().Get("prefix")) {
+						result.Contents = append(result.Contents, entry{relative, time.Now().UTC().Format(time.RFC3339), len(value.([]byte)), `"test-etag"`})
+					}
+					return true
+				})
+				w.Header().Set("Content-Type", "application/xml")
+				_ = xml.NewEncoder(w).Encode(result)
+				return
+			}
 			b, ok := objects.Load(r.URL.Path)
 			if !ok {
 				w.WriteHeader(404)
@@ -57,6 +98,14 @@ func fakeS3(t *testing.T) (*s3Storage, *sync.Map, *httptest.Server) {
 		case "DELETE":
 			objects.Delete(r.URL.Path)
 			w.WriteHeader(204)
+		case "HEAD":
+			value, ok := objects.Load(r.URL.Path)
+			if !ok {
+				w.WriteHeader(404)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(len(value.([]byte))))
+			w.WriteHeader(200)
 		default:
 			w.WriteHeader(405)
 		}
@@ -151,7 +200,7 @@ func TestS3RequestUUIDPathsAndOptIn(t *testing.T) {
 		if err != nil || inStatus != "stored" || outStatus != "stored" || logUUID != requestID {
 			t.Fatal("archive/log UUID not linked", err, inStatus, outStatus)
 		}
-		if !strings.HasPrefix(inPath, "g1/") || !strings.HasSuffix(inPath, requestID+"-in.json") || !strings.HasSuffix(outPath, requestID+"-out.json") {
+		if !strings.HasPrefix(inPath, "key-json-data/g1/") || !strings.HasSuffix(inPath, requestID+"-in.json") || !strings.HasSuffix(outPath, requestID+"-out.json") {
 			t.Fatal("incorrect S3 path", inPath, outPath)
 		}
 		in, ok := objects.Load("/gateway-test/" + inPath)

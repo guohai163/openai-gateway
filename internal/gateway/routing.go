@@ -12,11 +12,12 @@ import (
 
 type Upstream struct {
 	ID, Model, ProbeModel, Platform, ServiceTier string
+	ProxyID                                      string
 	Secret                                       []byte
 }
 
 const upstreamJoins = `FROM upstream_keys k `
-const selectUpstream = `SELECT k.id,k.secret,k.probe_model,k.platform ` + upstreamJoins
+const selectUpstream = `SELECT k.id,k.secret,k.probe_model,k.platform,coalesce(k.proxy_id,'') ` + upstreamJoins
 const available = `k.enabled AND NOT k.invalid AND NOT k.quota_blocked AND k.model_synced_at IS NOT NULL`
 
 // Bailian exposes OpenAI-compatible inference under compatible-mode/v1 while
@@ -82,7 +83,7 @@ func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayK
 	out := []Upstream{}
 	for rows.Next() {
 		var u Upstream
-		if e = rows.Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform); e != nil {
+		if e = rows.Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform, &u.ProxyID); e != nil {
 			return nil, e
 		}
 		u.Model = model
@@ -114,6 +115,7 @@ func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayK
 	return out, nil
 }
 func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, body []byte) (*http.Request, error) {
+	ctx = withOutboundProxy(ctx, u.ProxyID)
 	// 优化：避免将 []byte 强制转换为 string 导致的内存拷贝（减少大请求的 GC 压力）
 	base := a.upstreamBaseURL(u.Platform)
 	path = upstreamRequestPath(u.Platform, path)

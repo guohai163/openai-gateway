@@ -2379,6 +2379,13 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
 .key-budget-summary { gap: 10px; min-width: 160px; }
 .key-budget-summary small { color: var(--muted); font-size: 11px; }
 .key-budget-summary span { white-space: nowrap; font-size: 12px; }
+.proxy-form-fields { border: 0; margin: 0; min-width: 0; }
+.backup-form { display: grid; gap: 14px; padding: 20px; }
+.backup-restore-help { padding: 0 20px 20px; line-height: 1.7; }
+.backup-restore-help summary { cursor: pointer; font-weight: 600; }
+.backup-restore-help li + li { margin-top: 8px; }
+.backup-object-key { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.proxy-address-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr); gap: 16px; }
 .upstream-toggle { background: none; gap: 8px; padding: 5px; }
 .upstream-toggle > span { display: inline-block; width: 30px; height: 18px; border-radius: 12px; background: var(--hover); position: relative; flex-shrink: 0; }
 .upstream-toggle > span::after { content: ""; position: absolute; width: 12px; height: 12px; top: 3px; left: 3px; background: var(--muted); border-radius: 50%; }

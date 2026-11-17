@@ -553,7 +553,7 @@ func parseBailianPricing(models []bailianModel) ([]modelPrice, error) {
 
 func (a *App) fetchBailianPricing(ctx context.Context, source string) ([]modelPrice, error) {
 	var u Upstream
-	if e := a.DB.QueryRow(ctx, selectUpstream+`WHERE k.platform='bailian' AND k.enabled AND NOT k.invalid ORDER BY k.id LIMIT 1`).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform); e != nil {
+	if e := a.DB.QueryRow(ctx, selectUpstream+`WHERE k.platform='bailian' AND k.enabled AND NOT k.invalid ORDER BY k.id LIMIT 1`).Scan(&u.ID, &u.Secret, &u.ProbeModel, &u.Platform, &u.ProxyID); e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, errors.New("pricing_key_required")
 		}
@@ -564,6 +564,7 @@ func (a *App) fetchBailianPricing(ctx context.Context, source string) ([]modelPr
 		return nil, errors.New("pricing_fetch_failed")
 	}
 	endpoint := strings.TrimRight(source, "/")
+	ctx = withOutboundProxy(ctx, u.ProxyID)
 	if !strings.HasSuffix(endpoint, "/api/v1/models") {
 		endpoint += "/api/v1/models"
 	}
@@ -588,7 +589,7 @@ func (a *App) fetchBailianPricing(ctx context.Context, source string) ([]modelPr
 		}
 		req.Header.Set("Authorization", "Bearer "+secret)
 		req.Header.Set("Accept", "application/json")
-		resp, e := a.Client.Do(req)
+		resp, e := a.doOutbound(req)
 		if e != nil {
 			return nil, errors.New("pricing_fetch_failed")
 		}

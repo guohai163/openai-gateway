@@ -50,6 +50,7 @@ import {
 } from "./LogFilters";
 import { SpendingDetails, formatTotals, money } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
+import { BackupSettings } from "./BackupSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
 import { LoginForm } from "./LoginForm";
 import { KeyRoutingFields } from "./KeyRoutingFields";
@@ -59,6 +60,8 @@ import { KeyConcurrencyFields, KeyConcurrencySummary } from "./KeyConcurrencyFie
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import { OAuthAccounts } from "./OAuthAccounts";
+import { ProxySettings } from "./ProxySettings";
+import { ProxySelect } from "./ProxySelect";
 import { ModelRequestTest } from "./ModelRequestTest";
 import { subscribeRequestLogs } from "./log-live.mjs";
 import "./style.css";
@@ -68,6 +71,7 @@ type Page =
   | "pricing"
   | "upstream_keys"
   | "oauth_accounts"
+  | "proxies"
   | "gateway_keys"
   | "logs"
   | "settings"
@@ -96,6 +100,20 @@ async function api(path: string, options: RequestInit = {}) {
   if (v.csrf && (csrf === sentCSRF || csrf === token)) csrf = v.csrf;
   if (!res.ok) throw Error(v.error?.code || "unexpected_error");
   return v;
+}
+async function downloadSiteBackup(password: string, signal: AbortSignal) {
+  const sentCSRF = csrf;
+  let res: Response;
+  try {
+    res = await fetch("/admin/api/backups", {method:"POST", signal, headers:{"Content-Type":"application/json","X-CSRF-Token":sentCSRF}, body:JSON.stringify({password})});
+  } catch {throw Error("network_error");}
+  const token=res.headers.get("X-CSRF-Token");if(token && csrf===sentCSRF)csrf=token;
+  if(!res.ok){const body=await res.json().catch(()=>({}));throw Error(body.error?.code || "backup_failed");}
+  if(!res.headers.get("Content-Type")?.includes("application/octet-stream"))throw Error("backup_failed");
+  const data=await res.blob(),url=URL.createObjectURL(data),anchor=document.createElement("a");
+  anchor.href=url;anchor.download=res.headers.get("Content-Disposition")?.match(/filename="(gateway-backup-[0-9A-Za-z_-]+\.aigw)"/)?.[1] || "gateway-backup.aigw";
+  document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  return {object_key:res.headers.get("X-Gateway-Backup-Object-Key") || "",warning:res.headers.get("X-Gateway-Backup-Warning") || ""};
 }
 function App() {
   const [preference, setPreference] = useState(
@@ -232,7 +250,7 @@ function App() {
       .catch(() => signOut());
   }, []);
   async function load(silent = false) {
-    if (page === "pricing" || page === "users" || page === "account" || page === "oauth_accounts") return;
+    if (page === "pricing" || page === "users" || page === "account" || page === "oauth_accounts" || page === "proxies") return;
     const generation = sessionGeneration.current;
     const requestGeneration = ++loadGeneration.current;
     if (!silent) {
@@ -366,6 +384,10 @@ function App() {
     const form = new FormData(e.currentTarget);
     const input: Row = Object.fromEntries(form);
     input.enabled = input.enabled === "true";
+    if (page === "upstream_keys") {
+      if (input.proxy_ready !== "true") { setError("proxy_load_failed"); return; }
+      delete input.proxy_ready;
+    }
     if (page === "gateway_keys") {
       if (isAdmin) {
         try {
@@ -532,6 +554,7 @@ function App() {
     ["overview", <LayoutDashboard size={18} />],
     ["upstream_keys", <KeyRound size={18} />],
     ["oauth_accounts", <Globe size={18} />],
+    ["proxies", <Globe size={18} />],
     ["pricing", <Coins size={18} />],
     ["gateway_keys", <ShieldCheck size={18} />],
     ["logs", <Activity size={18} />],
@@ -555,6 +578,7 @@ function App() {
     upstream_keys: [
       "name",
       "platform",
+      "proxy_name",
       "enabled",
       "month_cost",
       "models",
@@ -591,6 +615,7 @@ function App() {
     }}><span aria-hidden="true" />{t(r.enabled ? "on" : "off")}</button>;
     if (c === "platform")
       return <PlatformIdentity platform={r.platform} t={t} />;
+    if (c === "proxy_name") return v || t("proxyDefault");
     if (c === "ip" && page === "logs")
       return <ClientIPDetails key={r.id} logId={r.id} ip={v} api={api} t={t} />;
     if (c === "user_agent")
@@ -866,7 +891,7 @@ function App() {
                   </small>
                 </div>
               )}
-              {!["pricing", "users", "account", "oauth_accounts"].includes(page) && (
+              {!["pricing", "users", "account", "oauth_accounts", "proxies"].includes(page) && (
                 <button
                   className="secondary"
                   disabled={loading || busy}
@@ -903,7 +928,9 @@ function App() {
               </button>
             </div>
           )}
-          {page === "oauth_accounts" ? (
+          {page === "proxies" ? (
+            <ProxySettings api={api} t={t} onUnauthorized={signOut} />
+          ) : page === "oauth_accounts" ? (
             <OAuthAccounts api={api} t={t} onUnauthorized={signOut} />
           ) : page === "pricing" ? (
             <ModelPricing
@@ -1003,6 +1030,7 @@ function App() {
             </>
           ) : page === "settings" ? (
             <>
+              {isAdmin && <BackupSettings api={api} download={downloadSiteBackup} t={t} onUnauthorized={signOut} />}
               <section className="panel">
                 <div className="panel-heading">
                   <h2>{t("deploymentSettings")}</h2>
@@ -1326,6 +1354,7 @@ function App() {
                       />
                       <small>{t("channelHint")}</small>
                     </div>
+                    <ProxySelect key={`proxy-${modal.id || "new"}`} api={api} initialValue={modal.proxy_id} t={t} />
                     {!modal.id &&
                       field("key", "password", "upstreamHint", true)}
                     {field("probe_model", "text", "probeHint")}

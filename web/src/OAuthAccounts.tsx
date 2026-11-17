@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDateTime as date } from "./date-time.mjs";
 import { ModelRequestTest } from "./ModelRequestTest";
+import { ProxyChoice, type ProxyOption } from "./ProxySelect";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
@@ -20,6 +21,8 @@ type Account = {
   refresh_error: string;
   model_sync_error: string;
   model_count: number;
+  proxy_id: string | null;
+  proxy_name: string | null;
 };
 type Attempt = {
   attempt_id: string;
@@ -32,6 +35,11 @@ type Attempt = {
 export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
+  const [proxies, setProxies] = useState<ProxyOption[]>([]);
+  const [proxyID, setProxyID] = useState("");
+  const [proxyReady, setProxyReady] = useState(false);
+  const [editingProxy, setEditingProxy] = useState<Account | null>(null);
+  const [editProxyID, setEditProxyID] = useState("");
   const [pending, setPending] = useState<Attempt | null>(null);
   const [callback, setCallback] = useState("");
   const [error, setError] = useState("");
@@ -49,8 +57,15 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
     if (code === "unauthorized") onUnauthorized();
   }
   async function load() {
-    const result = await api("oauth_accounts");
-    if (mounted.current) setAccounts(result.data);
+    const [result, proxyOptions] = await Promise.all([
+      api("oauth_accounts"),
+      api("proxies"),
+    ]);
+    if (mounted.current) {
+      setAccounts(result.data);
+      setProxies(proxyOptions);
+      setProxyReady(true);
+    }
   }
   useEffect(() => {
     mounted.current = true;
@@ -106,7 +121,9 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
     await perform(async () => {
       const result = await api("oauth_accounts/authorize", {
         method: "POST",
-        body: JSON.stringify(account ? { account_id: account.id } : { name }),
+        body: JSON.stringify(
+          account ? { account_id: account.id } : { name, proxy_id: proxyID },
+        ),
       });
       if (!mounted.current) return;
       setPending(result);
@@ -164,10 +181,21 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
               placeholder={t("oauthNamePlaceholder")}
             />
           </label>
-          <button className="primary" disabled={busy || !!pending}>
+          <ProxyChoice
+            options={proxies}
+            value={proxyID}
+            onChange={setProxyID}
+            disabled={busy || !proxyReady}
+            t={t}
+          />
+          <button
+            className="primary"
+            disabled={busy || !!pending || !proxyReady}
+          >
             {t("oauthStart")}
           </button>
         </form>
+        <small className="muted">{t("oauthProxyHint")}</small>
       </section>
       {pending && (
         <section
@@ -244,6 +272,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
                 {[
                   "name",
                   "status",
+                  "proxy_name",
                   "expires_at",
                   "oauthNextRefresh",
                   "models",
@@ -277,6 +306,20 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
                         {t(account.refresh_error)}
                       </small>
                     )}
+                  </td>
+                  <td>
+                    {account.proxy_name || t("proxyDefault")}
+                    <button
+                      className="text-button"
+                      disabled={busy || !!pending}
+                      onClick={() => {
+                        setEditingProxy(account);
+                        setEditProxyID(account.proxy_id || "");
+                        setError("");
+                      }}
+                    >
+                      {t("edit")}
+                    </button>
                   </td>
                   <td>{date(account.expires_at)}</td>
                   <td>
@@ -370,6 +413,68 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
           onUnauthorized={onUnauthorized}
           onClose={() => setTesting(null)}
         />
+      )}
+      {editingProxy && (
+        <div className="modal-overlay">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("outboundProxy")}
+          >
+            <div className="modal-heading">
+              <h2>
+                {editingProxy.name} · {t("outboundProxy")}
+              </h2>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void perform(async () => {
+                  await api(
+                    `oauth_accounts/${encodeURIComponent(editingProxy.id)}`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ proxy_id: editProxyID }),
+                    },
+                  );
+                  if (!mounted.current) return;
+                  setEditingProxy(null);
+                  await load();
+                });
+              }}
+            >
+              <div className="form-fields">
+                {error && (
+                  <p className="error-hint" role="alert">
+                    {t(error)}
+                  </p>
+                )}
+                <ProxyChoice
+                  options={proxies}
+                  value={editProxyID}
+                  onChange={setEditProxyID}
+                  disabled={busy || !proxyReady}
+                  t={t}
+                />
+                <small>{t("oauthProxyHint")}</small>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setEditingProxy(null)}
+                >
+                  {t("cancel")}
+                </button>
+                <button className="primary" disabled={busy || !proxyReady}>
+                  {t("save")}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
       {selected && (
         <section className="panel account-panel">

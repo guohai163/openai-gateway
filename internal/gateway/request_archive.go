@@ -114,7 +114,7 @@ func (a *App) archiveRequest(ctx context.Context, k GatewayKey, r *http.Request,
 	if name == "" {
 		name = k.ID
 	}
-	prefix := name + "/" + started.In(a.reportLocation()).Format("2006-01") + "/" + k.RequestUUID
+	prefix := keyJSONPrefix + name + "/" + started.In(a.reportLocation()).Format("2006-01") + "/" + k.RequestUUID
 	inStatus, outStatus := "disabled", "disabled"
 	inPath, outPath := "", ""
 	if k.StoreInput {

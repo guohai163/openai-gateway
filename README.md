@@ -39,6 +39,19 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 测试会产生所选上游的实际用量；密钥只在服务端解密，不回传浏览器，审计仅保存测试操作和密钥 ID。文本测试不适用于仅支持图片、音频或 Embeddings 的模型。
 
+## 出站代理
+
+管理员在侧边栏 **代理** 菜单新增、编辑或删除 HTTP、HTTPS、SOCKS5 代理，设置名称、主机、端口、可选用户名/密码、启停和可选到期时间。主机填写域名、IPv4 或 IPv6，不包含协议、路径或账号；端口范围为 `1`～`65535`。HTTP/HTTPS 支持代理认证及 HTTPS CONNECT 隧道，SOCKS5 支持用户名/密码认证并由代理解析目标域名。
+
+- **上游密钥**：新增或编辑 OpenAI/百炼 Key 时，在“出站代理”选择对应代理。该 Key 的推理、图片、模型目录同步、百炼价格同步、恢复探测与请求测试均使用所选代理。创建密钥时先保存代理选择，再执行首次模型同步。未指定时沿用网关默认网络，包括部署环境已有的 HTTP(S) 代理变量。
+- **OAuth 授权**：新增账户前选择代理；已有账户可在列表“代理”列编辑。服务端的授权码换 Token、身份验证/JWKS、Token 续期、模型同步和请求测试均使用该账户的代理。浏览器中的 ChatGPT 登录网页仍使用浏览器自身网络；OAuth 授权进行中不能修改账户代理。
+- 代理停用、到期、认证失败或无法连接时，请求失败，**不会自动切换为默认网络**。修改代理主机或凭据后，新请求使用新配置；已放行的连接继续完成。可通过所绑定账户的“同步模型”或“测试”验证实际访问。
+- 代理密码使用现有 `MASTER_KEY` 加密保存，不回传浏览器。编辑时留空保留原密码，也可显式清除；用户名留空时移除认证。被账户绑定的代理不能删除，需先改绑或取消绑定。所有代理配置仅管理员可访问，普通用户不能查看或修改。
+
+管理接口：`GET/POST /admin/api/proxies`、`PATCH/DELETE /admin/api/proxies/{id}`。创建/编辑表单字段为 `name`、`protocol`（`http`/`https`/`socks5`）、`host`、`port`、`username`、可选 `password`、`enabled`、可选 RFC3339 `expires_at`（`null` 不过期）；编辑需提交名称、协议、主机、端口和用户名，省略密码保留，空字符串清除。上游密钥创建/编辑、OAuth 开始授权接口接受 `proxy_id`；已有 OAuth 账户通过 `PATCH /admin/api/oauth_accounts/{id}` 修改。`proxy_id` 为空字符串时取消指定，省略时保留原选择。
+
+启动自动执行 `023_outbound_proxies.sql`；已有上游 Key 和 OAuth 账户保持默认网络。升级保留数据库卷及 `MASTER_KEY`，刷新管理页面后即可使用代理菜单。
+
 ## ChatGPT OAuth 接入
 
 管理员侧边栏中的 **上游密钥** 继续管理 API Key，**OAuth 授权** 单独管理 ChatGPT 账户，提供账户接入、模型列表、Token 续期和手动请求测试。OAuth 账户不会进入现有上游密钥池，也不会改变 `/v1/models` 或推理路由。
@@ -444,17 +457,39 @@ docker compose exec -T postgres sh -c \
 
 ## 备份与恢复
 
-数据库卷保存配置、密钥密文、会话、响应归属、日志与统计。必须同时保管 `MASTER_KEY`；丢失后无法解密上游凭据或回显私有密钥（私有密钥仍可通过哈希认证）。
+管理员在 **系统设置 → 站点备份与恢复 → 定时备份** 输入并确认一个至少 12 个字符的独立备份密码并保存，即可启用自动备份。默认每天报表时区（`REPORT_TIMEZONE`，默认上海时间）**03:00** 执行，**保留 7 天**；可改为每小时整点、每天指定时间或每周指定日期和时间，保留天数可设为 1～3650 天。定时任务需要配置 S3；密码使用原 `MASTER_KEY` 加密保存在数据库中，不会回传浏览器。可点击“立即备份到存储桶”验证配置，页面展示下次执行时间、最近 20 次执行记录、对象路径和失败原因。修改密码后，旧备份仍需使用旧密码。
+
+站点备份上传到同一桶的 `backup-data/YYYY-MM/`，例如 `backup-data/2026-11/gateway-backup-2026-11-17_03-00-00-站点UUID-任务UUID.aigw`。年月和完整日期时间使用报表时区，UUID 防止同秒文件冲突并区分站点。**仅在新备份上传成功后**，清理当前站点生成且最后修改时间早于保留天数的备份；不会清理请求 JSON、其他站点的备份或目录内非本网关命名的文件。上传失败保留全部旧备份，清理失败会显示警告，之后再次尝试。存储桶自身的生命周期规则仍会生效，应与保留天数一致。
+
+“手动下载备份”可使用单独密码即时生成 `.aigw` 文件；配置 S3 时也会上传到上述目录，未配置 S3 时仍支持下载。备份包含 PostgreSQL 数据库、原 `MASTER_KEY` 和运行/S3 连接设置；包含用户密码哈希、TOTP、私有/上游密钥、OAuth 账户、代理、模型、日志及费用数据。备份文件与密码应分开保管，备份密码无法找回。
+
+备份采用固定参数 scrypt 派生密钥、XChaCha20-Poly1305 分块认证加密，文件截断、篡改和错误密码均会拒绝解包。数据库使用 PostgreSQL `pg_dump` 自定义格式的一致性快照；创建过程最多 15 分钟，同一数据库的多个网关实例共享备份租约，只允许一项备份，进程退出后的租约最多 20 分钟失效。调度器每分钟检查，启动时补做已到期的任务，失败后最迟约 15 分钟重试。临时文件位于私有目录并在完成或失败后清理。需要为数据库压缩转储、临时归档和加密文件预留足够磁盘空间。Docker 镜像内置 PostgreSQL 17 客户端；二进制部署需安装不低于源数据库大版本的 `pg_dump`。
+
+**S3 桶内的请求正文、Nginx/域名配置和 HTTPS 证书不在备份包内，需另外备份。** 为防止恢复旧登录态和占用状态，排除登录会话、MFA 登录挑战、未完成 OAuth 授权、并发预留及备份租约数据。恢复后用原账号、密码和 TOTP 重新登录。
+
+完整异地恢复命令见 [恢复说明](internal/gateway/backup_restore.md)，解包后的 `RESTORE.md` 也包含同一份说明。恢复流程：
+
+1. 新服务器准备 Docker、Compose 和本项目 `docker-compose.yaml`，使用包含备份功能且不旧于源站点的网关镜像。
+2. 安全输入并导出 `BACKUP_PASSWORD`，使用 `gateway backup-extract --file 备份文件.aigw --out restored` 解包。该命令不需要数据库、原 `.env` 或原 `MASTER_KEY`，输出目录必须不存在。Docker 调用示例见恢复说明。
+3. 在新的空站点，将 `restored/.env.restore` 复制为 `.env`，检查代理来源、域名与 S3 等配置；原 `MASTER_KEY` 已自动包含，不要更换。新数据库及初始管理员环境密码会重新随机生成，恢复后的实际账号密码仍以原数据库为准。
+4. 只启动 PostgreSQL（`docker compose up -d --wait postgres`），保持网关停止，导入后再启动网关：
 
 ```sh
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > openai.dump
-# 在新建空数据库中恢复，恢复时先停止网关。
 docker compose stop gateway
-cat openai.dump | docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists'
+docker compose exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges --exit-on-error --single-transaction' \
+  < restored/database.dump
 docker compose up -d gateway
+curl --fail http://127.0.0.1:8080/healthz
 ```
 
-迁移在启动时执行，使用版本表和数据库锁，升级前备份。日志和响应归属首版不自动删除，请按容量规划保留时间；删除归属记录会使对应响应无法续接。会话和过期冷却记录自动清理。
+5. 使用原账号和 TOTP 登录，核对密钥、代理及历史记录，再切换流量。迁移前下载最后备份并立即停止旧网关，避免新旧站点同时续期 OAuth；旧备份中的 Refresh Token 如已轮换或撤销，需要重新授权。S3 对象另行复制或继续连接原存储桶。
+
+管理接口 `GET /admin/api/backups` 返回工具可用状态、定时配置和最近执行记录；`PATCH /admin/api/backups/settings` 保存 `enabled`、`frequency`（`hourly/daily/weekly`）、`run_time`（`HH:MM`）、`weekday`（0=周日）、`retention_days` 和可选 `password`（省略保留原密码）；`POST /admin/api/backups/run` 使用已保存密码立即上传；`POST /admin/api/backups` 接受 `{"password":"独立备份密码"}`，返回禁止缓存的加密附件，并在响应头 `X-Gateway-Backup-Object-Key` 中返回上传路径。所有接口要求管理员会话，写入要求 CSRF；操作只审计事件与管理员身份，不记录密码和文件正文。升级自动执行 `024_scheduled_backups.sql`。
+
+原有手工数据库备份方式仍可使用：`docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > openai.dump`。这种单独的数据库转储不包含环境中的 `MASTER_KEY`，必须另存原 `.env` 或主密钥。恢复前备份目标站点，优先导入新的空数据库，不要直接覆盖已有数据卷。
+
+迁移在启动时执行，使用版本表和数据库锁。日志和响应归属不自动删除，请按容量规划保留时间；删除归属记录会使对应响应无法续接。会话和过期冷却记录自动清理。
 
 首版运行一个 Go 实例。轮询游标与登录限速在进程内；状态、额度、探测计划和会话在 PostgreSQL。需要多副本时应先增加共享调度、探测锁和分布式登录限速。
 
@@ -523,9 +558,10 @@ REPORT_TIMEZONE=Asia/Shanghai
 支持 Amazon S3、MinIO 及提供兼容接口的对象存储。`S3_ENDPOINT` 使用 HTTP(S) 的服务根地址，不包含桶名、子路径、查询参数或嵌入的凭据；生产部署使用 HTTPS。需要时将 `S3_FORCE_PATH_STYLE=false` 切换为桶域名访问。修改环境后执行 `docker compose up -d gateway` 重新创建容器。
 
 - **未配置 S3**：设置页没有 S3 区块，私钥没有 JSON 存储开关，保持只保存元数据。
-- **配置 S3**：设置页展示服务地址、区域和桶名，隐藏访问密钥。点击“测试写入与读取”会向 `_gateway-tests/<UUID>.json` 写入测试 JSON、读回比对并尝试删除测试对象；测试接口 `POST /admin/api/storage/test` 要求管理员会话及 CSRF。权限至少需要桶内对象的 PutObject、GetObject，测试清理另需 DeleteObject。
+- **配置 S3**：设置页展示服务地址、区域、桶名和 JSON/备份目录，隐藏访问密钥。点击“测试写入与读取”会向 `_gateway-tests/<UUID>.json` 写入测试 JSON、读回比对并尝试删除测试对象；测试接口 `POST /admin/api/storage/test` 要求管理员会话及 CSRF。JSON 读写需要 PutObject、GetObject，清理需要 DeleteObject；备份保留清理还需要 ListBucket，历史 JSON 迁移需要源对象读取和目标对象写入权限（CopyObject/HeadObject），较大备份需允许分段上传。桶需预先创建。
 - 私有 Key 的“JSON 存储配置”（新建/编辑也可设置）分别控制 `store_input`、`store_output`，默认都关闭。配置 S3 **不会自动启用任何私钥的正文存储**。在这里开启后，请求正文会发送到你配置的存储桶。
-- 路径为 `私钥name/YYYY-MM/请求UUID-in.json`、`私钥name/YYYY-MM/请求UUID-out.json`。年月按请求开始时间及 `REPORT_TIMEZONE` 计算，重命名私钥后，历史文件保留旧路径；旧版名称中不适合作为单一路径段的字符会替换为连字符。
+- 路径为 `key-json-data/私钥name/YYYY-MM/请求UUID-in.json`、`key-json-data/私钥name/YYYY-MM/请求UUID-out.json`。年月按请求开始时间及 `REPORT_TIMEZONE` 计算，重命名私钥后，历史文件保留旧名称；名称中不适合作为单一路径段的字符会替换为连字符。
+- 升级后后台每分钟分批迁移数据库中引用的旧 JSON 对象：先复制到 `key-json-data/` 并校验，再更新日志引用，最后删除旧对象。中断或权限错误会保留原对象并重试，不移动未被数据库引用的其他文件。恢复较旧备份时，旧日志路径仍可回退读取已迁移的对象，并继续完成路径更新。
 - `X-Gateway-Request-ID` 响应头、调用记录 `request_uuid` 和 S3 对象文件名一致。每条新的调用记录 `id` 也使用 UUID；多个上游重试记录共用一个 `request_uuid`，归档保留客户端输入及最终响应。
 - 调用记录的“显示列”可勾选“UA（User-Agent）”，查看客户端请求携带的 User-Agent，悬停可查看完整内容。管理员及普通用户均可查看其有权限访问的日志；历史记录或未携带 User-Agent 的请求显示“—”。
 - 普通有效 JSON 保留原始正文。SSE 输出保存为 JSON 包装：`{"format":"sse","data":"原始 SSE 文本","complete":true,"status":200,"request_uuid":"..."}`；中断时 `complete=false`，不会改变向客户端传输的 SSE 字节。无 JSON 正文的请求/响应使用同类包装。认证头、Cookie 和其它 HTTP 头不会写入对象。
@@ -533,4 +569,4 @@ REPORT_TIMEZONE=Asia/Shanghai
 - 单方向最多捕获 32 MiB；超限不上传截断内容，记录状态“超过 32 MiB，未存储”。S3 失败不重放模型调用，也不修改客户端响应；归档在响应刷出后进行有超时的尽力写入，进程中断或失败不会自动重试。调用记录展示输入/输出对象路径及各自状态（待写入、已存储、失败等）。
 - 管理员可点击请求日志中“输入：已存储”或“输出：已存储”，在弹层中查看格式化、语法高亮的 JSON 并复制全文；SSE 等归档显示保存时的 JSON 包装。较大内容仅预览前 256K 个字符。读取接口为 `GET /admin/api/logs/{日志ID}/archive/input` 或 `output`，按日志中的已存储路径读取，不接受客户端指定对象路径；普通用户不可访问，响应禁止缓存。
 
-迁移 `010_storage_and_spend.sql` 增加开关、请求 UUID、对象路径/状态与消费查询索引；PostgreSQL 不保存对话正文。旧记录不回填 UUID 或 S3 文件。删除私钥保留历史调用与 S3 对象，存储桶保留期限由桶生命周期策略管理；数据库备份不包含 S3 对象。
+迁移 `010_storage_and_spend.sql` 增加开关、请求 UUID、对象路径/状态与消费查询索引；PostgreSQL 不保存对话正文。旧记录不回填 UUID 或 S3 文件。删除私钥保留历史调用与 S3 对象，JSON 存储期限由桶生命周期策略管理，与站点备份的保留天数独立；数据库备份不包含 S3 对象。

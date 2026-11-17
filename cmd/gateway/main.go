@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +16,22 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "backup-extract" {
+		flags := flag.NewFlagSet("backup-extract", flag.ExitOnError)
+		input := flags.String("file", "", "Encrypted .aigw backup file")
+		output := flags.String("out", "", "New directory for recovered files")
+		flags.Parse(os.Args[2:])
+		if *input == "" || *output == "" {
+			fmt.Fprintln(os.Stderr, "Usage: gateway backup-extract --file BACKUP.aigw --out NEW_DIRECTORY (set BACKUP_PASSWORD)")
+			os.Exit(1)
+		}
+		if err := gateway.ExtractSiteBackup(*input, *output, os.Getenv("BACKUP_PASSWORD")); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout, "Backup decrypted and verified. Read RESTORE.md in the output directory before restoring.")
+		return
+	}
 	c, err := gateway.LoadConfig()
 	if err != nil {
 		slog.Error(err.Error())

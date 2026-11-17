@@ -25,7 +25,7 @@ func (a *App) fetchModelCatalog(ctx context.Context, u Upstream) ([]json.RawMess
 		if err != nil {
 			return nil, nil, err
 		}
-		resp, err := a.Client.Do(req)
+		resp, err := a.doOutbound(req)
 		if err != nil {
 			return nil, nil, errors.New("model_sync_failed")
 		}

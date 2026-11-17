@@ -32,6 +32,7 @@ type resourceInput struct {
 	PromptCacheTTL        *string         `json:"prompt_cache_ttl"`
 	SpendLimits           *spendLimits    `json:"spend_limits"`
 	MaxConcurrentRequests json.RawMessage `json:"max_concurrent_requests,omitempty"`
+	ProxyID               *string         `json:"proxy_id"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -40,6 +41,24 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/"), "/"), "/")
 	resource := parts[0]
 	if !a.userAccess(w, r, parts) {
+		return
+	}
+	if resource == "backups" && len(parts) == 1 {
+		a.backupRoutes(w, r)
+		return
+	}
+	if resource == "backups" && len(parts) == 2 {
+		if parts[1] == "settings" && r.Method == http.MethodPatch {
+			a.backupSettings(w, r)
+			return
+		}
+		if parts[1] == "run" && r.Method == http.MethodPost {
+			a.backupRunNow(w, r)
+			return
+		}
+	}
+	if resource == "proxies" {
+		a.proxyRoutes(w, r, parts)
 		return
 	}
 	if resource == "oauth_accounts" {
@@ -117,7 +136,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		settings := map[string]any{"upstream": "OpenAI: https://api.openai.com; Bailian: https://dashscope.aliyuncs.com", "trusted_proxies": proxies, "secure_cookies": a.Config.SecureCookies, "model_sync_minutes": 10, "probe_initial_minutes": 5, "probe_max_minutes": 60, "request_timeout_seconds": a.Config.RequestTimeout.Seconds(), "report_timezone": a.reportLocation().String()}
 		if a.Storage != nil {
-			settings["storage"] = map[string]any{"endpoint": a.Config.S3.Endpoint, "bucket": a.Config.S3.Bucket, "region": a.Config.S3.Region}
+			settings["storage"] = map[string]any{"endpoint": a.Config.S3.Endpoint, "bucket": a.Config.S3.Bucket, "region": a.Config.S3.Region, "json_prefix": keyJSONPrefix, "backup_prefix": backupDataPrefix}
 		}
 		writeJSON(w, 200, settings)
 		return
@@ -325,6 +344,12 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	} = a.DB
 	switch resource {
 	case "upstream_keys":
+		if in.ProxyID != nil {
+			if err := a.validateProxySelection(ctx, *in.ProxyID); err != nil {
+				proxyAdminError(w, err)
+				return
+			}
+		}
 		if create {
 			platform := strings.TrimSpace(in.Platform)
 			if platform == "" {
@@ -343,7 +368,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 500, "encryption_failed")
 				return
 			}
-			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model) VALUES($1,$2,$3,$4,$5,$6,$7)", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel))
+			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model,proxy_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel), in.ProxyID)
 		} else {
 			if in.Platform != "" {
 				var platform string
@@ -360,7 +385,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 					return
 				}
 			}
-			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model) WHERE id=$1", id, name, in.Enabled, in.ProbeModel)
+			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model),proxy_id=CASE WHEN $5::text IS NULL THEN proxy_id ELSE nullif($5,'') END WHERE id=$1", id, name, in.Enabled, in.ProbeModel, in.ProxyID)
 		}
 	case "gateway_keys":
 		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil || len(in.MaxConcurrentRequests) != 0) {

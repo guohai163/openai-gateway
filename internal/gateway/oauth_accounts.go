@@ -22,6 +22,49 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(parts) == 2 && r.Method == http.MethodPatch {
+		var in struct {
+			ProxyID string `json:"proxy_id"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if err := a.validateProxySelection(ctx, in.ProxyID); err != nil {
+			proxyAdminError(w, err)
+			return
+		}
+		tx, err := a.DB.Begin(ctx)
+		if err != nil {
+			adminDBError(w, err)
+			return
+		}
+		defer tx.Rollback(ctx)
+		var id string
+		if err = tx.QueryRow(ctx, "SELECT id FROM oauth_accounts WHERE id=$1 FOR UPDATE", parts[1]).Scan(&id); err != nil {
+			oauthAdminError(w, err)
+			return
+		}
+		var pending bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_attempts WHERE account_id=$1 AND status IN ('pending','processing') AND expires_at>now())`, id).Scan(&pending); err != nil {
+			adminDBError(w, err)
+			return
+		}
+		if pending {
+			writeError(w, 409, "oauth_attempt_busy")
+			return
+		}
+		_, err = tx.Exec(ctx, "UPDATE oauth_accounts SET proxy_id=nullif($2,'') WHERE id=$1", id, in.ProxyID)
+		if err == nil {
+			err = tx.Commit(ctx)
+		}
+		if err != nil {
+			adminDBError(w, err)
+			return
+		}
+		a.audit(ctx, "update_proxy", "oauth_accounts", id)
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
 	if len(parts) == 3 && parts[2] == "test" && r.Method == http.MethodPost {
 		var in struct {
 			Model string `json:"model"`
@@ -42,7 +85,7 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 		var data []byte
 		err := a.DB.QueryRow(ctx, `SELECT coalesce(json_agg(t ORDER BY t.created_at,t.id),'[]') FROM (
  SELECT id,name,client_id,email,subject,scopes,expires_at,next_refresh_at,last_refreshed_at,
- refresh_error,model_synced_at,model_sync_error,created_at,jsonb_array_length(model_catalog) AS model_count,
+ refresh_error,model_synced_at,model_sync_error,created_at,proxy_id,(SELECT name FROM outbound_proxies p WHERE p.id=oauth_accounts.proxy_id) AS proxy_name,jsonb_array_length(model_catalog) AS model_count,
  CASE WHEN credentials IS NULL THEN 'disconnected'
       WHEN NOT ('chatgpt.tokens.use.direct'=ANY(scopes)) THEN 'permission_required'
       WHEN expires_at<=now() THEN 'expired' ELSE 'connected' END AS status
@@ -56,13 +99,14 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	}
 	if len(parts) == 2 && parts[1] == "authorize" && r.Method == http.MethodPost {
 		var in struct {
-			Name      string `json:"name"`
-			AccountID string `json:"account_id"`
+			Name      string  `json:"name"`
+			AccountID string  `json:"account_id"`
+			ProxyID   *string `json:"proxy_id"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
-		result, err := a.beginOAuth(ctx, actor(r).ID, strings.TrimSpace(in.Name), in.AccountID)
+		result, err := a.beginOAuth(ctx, actor(r).ID, strings.TrimSpace(in.Name), in.AccountID, in.ProxyID)
 		if err != nil {
 			oauthAdminError(w, err)
 			return
@@ -143,12 +187,21 @@ func oauthAdminError(w http.ResponseWriter, err error) {
 		writeError(w, 400, err.Error())
 		return
 	}
+	if strings.HasPrefix(err.Error(), "proxy_") {
+		proxyAdminError(w, err)
+		return
+	}
 	adminDBError(w, err)
 }
 
-func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string) (map[string]any, error) {
+func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string, proxyID *string) (map[string]any, error) {
 	if accountID == "" && (name == "" || len(name) > 120) {
 		return nil, errors.New("oauth_name_required")
+	}
+	if proxyID != nil {
+		if err := a.validateProxySelection(ctx, *proxyID); err != nil {
+			return nil, err
+		}
 	}
 	redirectURI, err := a.startOAuthCallback()
 	if err != nil {
@@ -171,7 +224,7 @@ func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string) (
 	}
 	if accountID == "" {
 		accountID = newID()
-		_, err = tx.Exec(ctx, "INSERT INTO oauth_accounts(id,name) VALUES($1,$2)", accountID, name)
+		_, err = tx.Exec(ctx, "INSERT INTO oauth_accounts(id,name,proxy_id) VALUES($1,$2,nullif($3,''))", accountID, name, proxyID)
 	} else {
 		err = tx.QueryRow(ctx, "SELECT client_id,email,credentials,scopes FROM oauth_accounts WHERE id=$1 FOR UPDATE", accountID).Scan(&clientID, &email, &secret, &scopes)
 	}
@@ -184,6 +237,11 @@ func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string) (
 	}
 	if processing {
 		return nil, errors.New("oauth_attempt_busy")
+	}
+	if proxyID != nil {
+		if _, err = tx.Exec(ctx, "UPDATE oauth_accounts SET proxy_id=nullif($2,'') WHERE id=$1", accountID, *proxyID); err != nil {
+			return nil, err
+		}
 	}
 	_, err = tx.Exec(ctx, "UPDATE oauth_attempts SET status='failed',error='oauth_attempt_expired',secret=NULL WHERE account_id=$1 AND status='pending'", accountID)
 	if err != nil {
@@ -271,10 +329,11 @@ func (a *App) completeOAuth(ctx context.Context, values url.Values, actorID, red
 	if json.Unmarshal([]byte(plain), &pending) != nil {
 		return errors.New("oauth_invalid_callback")
 	}
-	var clientID, subject string
-	if err = a.DB.QueryRow(ctx, "SELECT client_id,subject FROM oauth_accounts WHERE id=$1", accountID).Scan(&clientID, &subject); err != nil {
+	var clientID, subject, proxyID string
+	if err = a.DB.QueryRow(ctx, "SELECT client_id,subject,coalesce(proxy_id,'') FROM oauth_accounts WHERE id=$1", accountID).Scan(&clientID, &subject, &proxyID); err != nil {
 		return err
 	}
+	ctx = withOutboundProxy(ctx, proxyID)
 	issued := values.Get("client_id")
 	if clientID == "" {
 		if issued == "" || issued == "dynamic_agent_client" || len(issued) > 512 {
@@ -332,12 +391,12 @@ func (a *App) refreshOAuthAccount(ctx context.Context, id string, manual bool) e
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var clientID string
+	var clientID, proxyID string
 	var secret []byte
 	var next *time.Time
 	var failures int
 	// Hold the row lock through rotation and persistence, including across processes.
-	err = tx.QueryRow(ctx, "SELECT client_id,credentials,next_refresh_at,refresh_failures FROM oauth_accounts WHERE id=$1 FOR UPDATE", id).Scan(&clientID, &secret, &next, &failures)
+	err = tx.QueryRow(ctx, "SELECT client_id,credentials,next_refresh_at,refresh_failures,coalesce(proxy_id,'') FROM oauth_accounts WHERE id=$1 FOR UPDATE", id).Scan(&clientID, &secret, &next, &failures, &proxyID)
 	if err != nil {
 		return err
 	}
@@ -358,7 +417,8 @@ func (a *App) refreshOAuthAccount(ctx context.Context, id string, manual bool) e
 	if json.Unmarshal([]byte(plain), &old) != nil {
 		return errors.New("oauth_invalid_response")
 	}
-	tokens, refreshErr := a.oauthTokenRequest(ctx, url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "refresh_token": {old.RefreshToken}})
+	requestCtx := context.WithValue(withOutboundProxy(ctx, proxyID), outboundProxyQueryContext{}, tx)
+	tokens, refreshErr := a.oauthTokenRequest(requestCtx, url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "refresh_token": {old.RefreshToken}})
 	if refreshErr == nil {
 		expires, due, e := oauthExpiry(tokens, time.Now())
 		if e != nil {
@@ -421,7 +481,8 @@ func (a *App) syncOAuthModels(ctx context.Context, id string) (result error) {
 	var secret []byte
 	var scopes []string
 	var expires *time.Time
-	err := a.DB.QueryRow(ctx, "SELECT credentials,scopes,expires_at FROM oauth_accounts WHERE id=$1", id).Scan(&secret, &scopes, &expires)
+	var proxyID string
+	err := a.DB.QueryRow(ctx, "SELECT credentials,scopes,expires_at,coalesce(proxy_id,'') FROM oauth_accounts WHERE id=$1", id).Scan(&secret, &scopes, &expires, &proxyID)
 	if err != nil {
 		return err
 	}
@@ -442,7 +503,7 @@ func (a *App) syncOAuthModels(ctx context.Context, id string) (result error) {
 	var catalog struct {
 		Models []json.RawMessage `json:"models"`
 	}
-	if err = a.oauthJSON(ctx, oauthResource+"/models", credentials.AccessToken, &catalog); err != nil {
+	if err = a.oauthJSON(withOutboundProxy(ctx, proxyID), oauthResource+"/models", credentials.AccessToken, &catalog); err != nil {
 		return err
 	}
 	if catalog.Models == nil {

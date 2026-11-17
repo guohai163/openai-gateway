@@ -25,7 +25,7 @@ const (
 	oauthScopes            = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 )
 
-type oauthKeySet struct{ provider *oidc.Provider }
+type oauthKeySet struct{ providers map[string]*oidc.Provider }
 type oauthCredentials struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -43,8 +43,8 @@ type oauthIdentity struct {
 	Email   string `json:"email"`
 }
 
-func (a *App) oauthHTTPClient() *http.Client {
-	c := *a.Client
+func (a *App) oauthHTTPClient(ctx context.Context) *http.Client {
+	c := *a.outboundHTTPClient(ctx)
 	c.Timeout = 30 * time.Second
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &c
@@ -59,7 +59,7 @@ func (a *App) oauthJSON(ctx context.Context, endpoint, bearer string, out any) e
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := a.oauthHTTPClient().Do(req)
+	resp, err := a.oauthHTTPClient(ctx).Do(req)
 	if err != nil {
 		return errors.New("oauth_connection_failed")
 	}
@@ -82,7 +82,7 @@ func (a *App) oauthTokenRequest(ctx context.Context, form url.Values) (oauthToke
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	resp, err := a.oauthHTTPClient().Do(req)
+	resp, err := a.oauthHTTPClient(ctx).Do(req)
 	if err != nil {
 		return tokens, errors.New("oauth_connection_failed")
 	}
@@ -151,16 +151,20 @@ func (a *App) verifyOAuthIdentity(ctx context.Context, raw, clientID, nonce stri
 		return identity, errors.New("oauth_invalid_identity")
 	}
 	a.oauthMu.Lock()
-	provider := a.oauthKeySet.provider
+	proxyID, _ := ctx.Value(outboundProxyContext{}).(string)
+	provider := a.oauthKeySet.providers[proxyID]
 	if provider == nil {
 		var err error
 		// The provider retains the HTTP client for its shared JWKS cache.
-		provider, err = oidc.NewProvider(oidc.ClientContext(ctx, a.oauthHTTPClient()), oauthIssuer)
+		provider, err = oidc.NewProvider(oidc.ClientContext(ctx, a.oauthHTTPClient(ctx)), oauthIssuer)
 		if err != nil {
 			a.oauthMu.Unlock()
 			return identity, errors.New("oauth_identity_unavailable")
 		}
-		a.oauthKeySet.provider = provider
+		if a.oauthKeySet.providers == nil {
+			a.oauthKeySet.providers = map[string]*oidc.Provider{}
+		}
+		a.oauthKeySet.providers[proxyID] = provider
 	}
 	a.oauthMu.Unlock()
 	verified, err := provider.Verifier(&oidc.Config{ClientID: clientID, SupportedSigningAlgs: []string{oidc.RS256}}).Verify(ctx, raw)

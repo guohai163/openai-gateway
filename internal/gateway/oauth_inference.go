@@ -20,7 +20,8 @@ func (a *App) testOAuthAccount(ctx context.Context, id, model string) (modelTest
 	var secret, catalog []byte
 	var scopes []string
 	var expires *time.Time
-	if err := a.DB.QueryRow(ctx, "SELECT credentials,scopes,expires_at,model_catalog FROM oauth_accounts WHERE id=$1", id).Scan(&secret, &scopes, &expires, &catalog); err != nil {
+	var proxyID string
+	if err := a.DB.QueryRow(ctx, "SELECT credentials,scopes,expires_at,model_catalog,coalesce(proxy_id,'') FROM oauth_accounts WHERE id=$1", id).Scan(&secret, &scopes, &expires, &catalog, &proxyID); err != nil {
 		return result, err
 	}
 	if len(secret) == 0 || expires == nil || !expires.After(time.Now()) {
@@ -53,7 +54,7 @@ func (a *App) testOAuthAccount(ctx context.Context, id, model string) (modelTest
 	if json.Unmarshal([]byte(plain), &credentials) != nil || credentials.AccessToken == "" {
 		return result, errors.New("oauth_invalid_response")
 	}
-	return a.requestOAuthTest(ctx, credentials, model), nil
+	return a.requestOAuthTest(withOutboundProxy(ctx, proxyID), credentials, model), nil
 }
 
 func (a *App) requestOAuthTest(ctx context.Context, credentials oauthCredentials, model string) modelTestResult {

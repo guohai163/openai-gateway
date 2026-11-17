@@ -185,7 +185,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			req.GetBody = nil
 			req.Header.Set("Content-Type", imageBody.contentType)
 		}
-		resp, e := a.Client.Do(req)
+		resp, e := a.doOutbound(req)
 		if e != nil {
 			a.logAttempt(k, u, r, 502, "upstream_connection_error", start, Usage{}, responseID, attempt)
 			writeError(w, 502, "upstream_connection_error")

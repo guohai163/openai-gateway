@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -49,6 +50,13 @@ func (a *App) readLogArchive(w http.ResponseWriter, r *http.Request, logID, dire
 		return
 	}
 	data, err := a.Storage.Get(ctx, path)
+	if err != nil && (!strings.HasPrefix(path, keyJSONPrefix) || strings.Count(path, "/") < 3) {
+		fallback := keyJSONPrefix + path
+		data, err = a.Storage.Get(ctx, fallback)
+		if err == nil {
+			path = fallback
+		}
+	}
 	if err != nil {
 		writeError(w, 502, "archive_read_failed")
 		return

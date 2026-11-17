@@ -36,6 +36,9 @@ type App struct {
 	oauthRedirectURI  string
 	oauthContext      context.Context
 	oauthKeySet       oauthKeySet
+	proxyMu           sync.Mutex
+	proxyTransports   map[string]proxyTransportEntry
+	backupMu          sync.Mutex
 }
 type loginLimit struct {
 	Count int
