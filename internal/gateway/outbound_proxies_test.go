@@ -38,6 +38,54 @@ func TestProxyAddressValidation(t *testing.T) {
 	}
 }
 
+func TestProxyConnectivityTestUsesSelectedProxy(t *testing.T) {
+	a, server := testApp(t)
+	seedOrdinary(t, a, "proxy-test-user")
+	admin := fixtureSession(t, a, server.URL, "bootstrap")
+	ordinary := fixtureSession(t, a, server.URL, "proxy-test-user")
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/invalid":
+			fmt.Fprint(w, `{"ip":"invalid"}`)
+		case "/redirect":
+			http.Redirect(w, r, "/", http.StatusFound)
+		default:
+			fmt.Fprint(w, `{"ip":"203.0.113.42","country":"Example"}`)
+		}
+	}))
+	defer origin.Close()
+	a.Client = origin.Client()
+	var calls atomic.Int64
+	proxy := httpProxyFixture(t, origin, false, &calls)
+	id := createTestProxy(t, a, proxy.Listener.Addr().String(), "http")
+	if status, _ := ordinary.call(t, "POST", "proxies/"+id+"/test", "{}"); status != 403 {
+		t.Fatal("ordinary user can test proxy", status)
+	}
+	r := httptest.NewRequest("POST", "/admin/api/proxies/"+id+"/test", strings.NewReader("{}"))
+	r.AddCookie(admin.cookie)
+	w := httptest.NewRecorder()
+	a.Handler(nil).ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("test bypassed CSRF", w.Code)
+	}
+	result, err := a.testOutboundProxy(context.Background(), id, origin.URL)
+	if err != nil || !strings.Contains(string(result), "203.0.113.42") || calls.Load() != 1 {
+		t.Fatal("proxy was bypassed or result missing", string(result), calls.Load(), err)
+	}
+	if _, err := a.testOutboundProxy(context.Background(), id, origin.URL+"/invalid"); err == nil || err.Error() != "proxy_test_invalid_response" {
+		t.Fatal("invalid IP accepted", err)
+	}
+	if _, err := a.testOutboundProxy(context.Background(), id, origin.URL+"/redirect"); err == nil {
+		t.Fatal("redirect accepted", err)
+	}
+	if _, err := a.DB.Exec(context.Background(), "UPDATE outbound_proxies SET enabled=false WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.testOutboundProxy(context.Background(), id, origin.URL); err == nil {
+		t.Fatal("disabled proxy bypassed")
+	}
+}
+
 func createTestProxy(t *testing.T, a *App, address, protocol string) string {
 	t.Helper()
 	host, port, _ := net.SplitHostPort(address)

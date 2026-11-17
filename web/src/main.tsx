@@ -149,6 +149,8 @@ function App() {
     [settings, setSettings] = useState<Row>({});
   const [identity, setIdentity] = useState<Row>({});
   const isAdmin = identity.role === "admin";
+  const [settingsSection, setSettingsSection] = useState<"deployment" | "backup" | "storage">("deployment");
+  const activeSettingsSection = (!isAdmin && settingsSection !== "deployment") || (settingsSection === "storage" && !settings.storage) ? "deployment" : settingsSection;
   const [models, setModels] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
@@ -193,6 +195,7 @@ function App() {
     setData([]);
     setDashboard({});
     setSettings({});
+    setSettingsSection("deployment");
     setModels([]);
     setLogFilters({ ...emptyLogFilters });
     setLogOptions({});
@@ -1030,7 +1033,17 @@ function App() {
             </>
           ) : page === "settings" ? (
             <>
-              {isAdmin && <BackupSettings api={api} download={downloadSiteBackup} t={t} onUnauthorized={signOut} />}
+              <nav className="settings-tabs" aria-label={t("settingsSections")}>
+                {([
+                  ["deployment", "settingsDeployment"],
+                  ...(isAdmin ? [["backup", "settingsBackup"]] : []),
+                  ...(isAdmin && settings.storage ? [["storage", "settingsStorage"]] : []),
+                ] as ["deployment" | "backup" | "storage", string][]).map(([section, label]) => (
+                  <button key={section} type="button" aria-pressed={activeSettingsSection === section} onClick={() => setSettingsSection(section)}>{t(label)}</button>
+                ))}
+              </nav>
+              {isAdmin && <div hidden={activeSettingsSection !== "backup"}><BackupSettings api={api} download={downloadSiteBackup} t={t} onUnauthorized={signOut} /></div>}
+              <div hidden={activeSettingsSection !== "deployment"}>
               <section className="panel">
                 <div className="panel-heading">
                   <h2>{t("deploymentSettings")}</h2>
@@ -1053,9 +1066,6 @@ function App() {
                     ))}
                 </div>
               </section>
-              {isAdmin && settings.storage && (
-                <StorageSettings storage={settings.storage} api={api} t={t} />
-              )}
               <section className="privacy">
                 <ShieldCheck size={24} />
                 <div>
@@ -1063,6 +1073,10 @@ function App() {
                   <p>{t("securityHint")}</p>
                 </div>
               </section>
+              </div>
+              {isAdmin && settings.storage && (
+                <div hidden={activeSettingsSection !== "storage"}><StorageSettings storage={settings.storage} api={api} t={t} /></div>
+              )}
             </>
           ) : (
             <section className="panel data-panel">

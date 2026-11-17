@@ -24,7 +24,19 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
     [busy, setBusy] = useState(false);
   const [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [testResult, setTestResult] = useState<{
+    name: string;
+    loading: boolean;
+    data?: unknown;
+    duration_ms?: number;
+    error?: string;
+  } | null>(null);
   const mounted = useRef(true);
+  const testSequence = useRef(0);
+  function closeTest() {
+    testSequence.current++;
+    setTestResult(null);
+  }
   function fail(e: unknown) {
     if (!mounted.current) return;
     const code = e instanceof Error ? e.message : "unexpected_error";
@@ -69,7 +81,7 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
       <section className="panel account-panel">
         <div className="panel-heading">
           <h2>{t("proxies")}</h2>
-          <div className="row-actions">
+          <div className="action-buttons">
             <button
               className="secondary"
               disabled={busy}
@@ -149,6 +161,39 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
                     <div className="row-actions">
                       <button
                         disabled={busy}
+                        onClick={async () => {
+                          const sequence = ++testSequence.current;
+                          setTestResult({ name: row.name, loading: true });
+                          try {
+                            const result = await api(
+                              `proxies/${encodeURIComponent(row.id)}/test`,
+                              { method: "POST", body: "{}" },
+                            );
+                            if (mounted.current && sequence === testSequence.current)
+                              setTestResult({
+                                name: row.name,
+                                loading: false,
+                                ...result,
+                              });
+                          } catch (e) {
+                            const code =
+                              e instanceof Error
+                                ? e.message
+                                : "proxy_test_failed";
+                            if (mounted.current && sequence === testSequence.current)
+                              setTestResult({
+                                name: row.name,
+                                loading: false,
+                                error: code,
+                              });
+                            if (code === "unauthorized") onUnauthorized();
+                          }
+                        }}
+                      >
+                        {t("proxyTest")}
+                      </button>
+                      <button
+                        disabled={busy}
                         onClick={() => {
                           setError("");
                           setModal(row);
@@ -172,6 +217,50 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
         </div>
         {!rows.length && <p className="oauth-empty muted">{t("proxyEmpty")}</p>}
       </section>
+      {testResult && (
+        <div className="modal-overlay">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("proxyTestTitle")}
+          >
+            <div className="modal-heading">
+              <h2>{t("proxyTestTitle")}</h2>
+              <button
+                className="icon-button"
+                aria-label={t("close")}
+                onClick={closeTest}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="proxy-test-body">
+              <strong>{testResult.name}</strong>
+              <p className="muted">{t("proxyTestHint")}</p>
+              {testResult.loading ? (
+                <p role="status">{t("proxyTesting")}</p>
+              ) : testResult.error ? (
+                <p className="error-hint" role="alert">
+                  {t(testResult.error)}
+                </p>
+              ) : (
+                <div className="oauth-test-result">
+                  <strong className="oauth-test-success">
+                    {t("proxyTestSuccess")} · {testResult.duration_ms} ms
+                  </strong>
+                  <pre>{JSON.stringify(testResult.data, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="secondary" onClick={closeTest}>
+                {t("close")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {modal && (
         <ProxyForm
           key={modal.id || "new"}
@@ -379,7 +468,7 @@ function ProxyForm({
               />
               <small>{t("proxyExpiryHint")}</small>
             </label>
-            <div className="row-actions">
+            <div className="action-buttons">
               {[7, 30, 90, 180].map((days) => (
                 <button
                   type="button"

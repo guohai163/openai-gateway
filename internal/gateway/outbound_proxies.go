@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -162,6 +164,17 @@ func proxyAdminError(w http.ResponseWriter, err error) {
 
 func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string) {
 	ctx := r.Context()
+	if len(parts) == 3 && parts[2] == "test" && r.Method == http.MethodPost {
+		started := time.Now()
+		result, err := a.testOutboundProxy(ctx, parts[1], "https://ipconfig.io/json")
+		if err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
+		a.audit(ctx, "test", "proxies", parts[1])
+		writeJSON(w, 200, map[string]any{"data": result, "duration_ms": time.Since(started).Milliseconds()})
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		var data []byte
 		err := a.DB.QueryRow(ctx, `SELECT coalesce(json_agg(t ORDER BY t.created_at,t.id),'[]') FROM (
@@ -281,4 +294,40 @@ func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string
 		status = 201
 	}
 	writeJSON(w, status, map[string]string{"id": id})
+}
+
+// The test endpoint is fixed by the handler; callers cannot use it to probe
+// arbitrary destinations. It uses the same fail-closed transport as inference.
+func (a *App) testOutboundProxy(ctx context.Context, id, endpoint string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(withOutboundProxy(ctx, id), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.New("proxy_test_failed")
+	}
+	req.Header.Set("Accept", "application/json")
+	client := a.outboundHTTPClient(ctx)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, errors.New("proxy_test_failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, errors.New("proxy_test_failed")
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 32*1024+1))
+	if err != nil || len(data) > 32*1024 {
+		return nil, errors.New("proxy_test_invalid_response")
+	}
+	var result struct {
+		IP string `json:"ip"`
+	}
+	if json.Unmarshal(data, &result) != nil {
+		return nil, errors.New("proxy_test_invalid_response")
+	}
+	if _, err = netip.ParseAddr(result.IP); err != nil {
+		return nil, errors.New("proxy_test_invalid_response")
+	}
+	return json.RawMessage(data), nil
 }

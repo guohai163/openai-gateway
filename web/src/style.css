@@ -879,6 +879,34 @@ tbody tr:hover {
   display: flex;
   gap: 14px;
 }
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.proxy-test-body { display: grid; gap: 12px; padding: 20px 24px; }
+.proxy-test-body p { margin: 0; }
+.settings-tabs {
+  display: flex;
+  gap: 24px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.settings-tabs button {
+  flex: none;
+  padding: 12px 2px;
+  background: transparent;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-tabs button:hover,
+.settings-tabs button[aria-pressed="true"] { color: var(--text); }
+.settings-tabs button[aria-pressed="true"] { border-bottom-color: var(--primary); }
 .actions-column {
   position: sticky;
   right: 0;
