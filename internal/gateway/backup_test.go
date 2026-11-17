@@ -166,7 +166,7 @@ func TestBackupEnvironmentPreservesComposeCredentials(t *testing.T) {
 		} `json:"services"`
 	}
 	if err := json.Unmarshal(output, &parsed); err != nil || parsed.Services["gateway"].Environment["S3_SECRET_ACCESS_KEY"] != a.Config.S3.SecretKey {
-		t.Fatal("Compose changed a restored credential", err)
+		t.Fatalf("Compose changed the synthetic test credential: got %q, want %q (decode: %v)", parsed.Services["gateway"].Environment["S3_SECRET_ACCESS_KEY"], a.Config.S3.SecretKey, err)
 	}
 }
 
