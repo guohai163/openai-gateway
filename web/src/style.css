@@ -274,12 +274,12 @@ small {
 .sidebar-label.administration {
   margin-top: 24px;
 }
-nav {
+.sidebar nav {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-nav > button {
+.sidebar nav > button {
   justify-content: flex-start;
   padding: 11px 12px;
   border-radius: 8px;
@@ -288,11 +288,11 @@ nav > button {
   font-size: 14px;
   gap: 12px;
 }
-nav > button:hover {
+.sidebar nav > button:hover {
   background: var(--hover);
   color: var(--text);
 }
-nav > button.selected {
+.sidebar nav > button.selected {
   color: var(--text);
   background: var(--selected);
   font-weight: 500;
@@ -889,6 +889,8 @@ tbody tr:hover {
 .proxy-test-body p { margin: 0; }
 .settings-tabs {
   display: flex;
+  flex-direction: row;
+  align-items: center;
   gap: 24px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
@@ -897,6 +899,7 @@ tbody tr:hover {
 .settings-tabs button {
   flex: none;
   padding: 12px 2px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   border-bottom: 2px solid transparent;
