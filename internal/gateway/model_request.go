@@ -23,6 +23,8 @@ type modelTestResult struct {
 	ErrorCode  string `json:"error_code"`
 	ErrorParam string `json:"error_param"`
 	Detail     string `json:"detail"`
+	ProxyID    string `json:"proxy_id"`
+	ProxyName  string `json:"proxy_name"`
 }
 
 type modelTestError struct {

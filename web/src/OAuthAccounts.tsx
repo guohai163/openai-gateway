@@ -483,6 +483,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
               {selected.name} · {t("models")}
             </h2>
             <button
+              className="secondary"
               onClick={() => {
                 modelGeneration.current++;
                 setSelected(null);

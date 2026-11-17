@@ -2721,6 +2721,38 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
   display: grid;
   gap: 7px;
 }
+.account-form > button {
+  justify-self: start;
+}
+.account-dialog-body {
+  display: grid;
+  gap: 12px;
+  padding: 20px 24px;
+  line-height: 1.6;
+}
+.account-dialog-body p { margin: 0; color: var(--muted); }
+.account-dialog-body input { width: 100%; }
+.user-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.user-create-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.user-create-form label:first-child {
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+.user-create-form label:nth-child(2) {
+  flex: 0 1 160px;
+}
+.user-create-form button {
+  flex-shrink: 0;
+}
 
 .client-ip-details {
   min-width: 155px;

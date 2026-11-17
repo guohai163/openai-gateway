@@ -21,6 +21,8 @@ type Result = {
   error_code: string;
   error_param: string;
   detail: string;
+  proxy_id: string;
+  proxy_name: string;
 };
 
 export function ModelRequestTest({
@@ -193,6 +195,7 @@ export function ModelRequestTest({
                 {result.model} · {result.duration_ms} ms
                 {result.http_status ? ` · HTTP ${result.http_status}` : ""}
               </small>
+              <small className="muted">{t("modelTestEgress")}: {result.proxy_id ? result.proxy_name || result.proxy_id : t("proxyDefault")}</small>
               {result.error_code && (
                 <code>
                   {result.error_code}

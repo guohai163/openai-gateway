@@ -50,7 +50,7 @@ export function UserManagement({ api, t }: Props) {
       <section className="panel account-panel">
         <h2>{t("createUser")}</h2>
         <form
-          className="spending-range"
+          className="user-create-form"
           onSubmit={async (e) => {
             e.preventDefault();
             const form = e.currentTarget;
@@ -84,7 +84,9 @@ export function UserManagement({ api, t }: Props) {
               <option value="admin">{t("roleAdmin")}</option>
             </select>
           </label>
-          <button disabled={busy}>{t("createUser")}</button>
+          <button className="primary" disabled={busy}>
+            {t("createUser")}
+          </button>
         </form>
       </section>
       <section className="data-panel">
@@ -177,19 +179,26 @@ export function UserManagement({ api, t }: Props) {
       {created && (
         <div className="modal-overlay">
           <section className="modal form-modal" role="dialog" aria-modal="true">
-            <h2>{t("initialPassword")}</h2>
-            <p>{t("passwordOnceHint")}</p>
-            <p>{created.email}</p>
-            <input readOnly value={created.password} />
+            <div className="modal-heading">
+              <h2>{t("initialPassword")}</h2>
+            </div>
+            <div className="account-dialog-body">
+              <p>{t("passwordOnceHint")}</p>
+              <p>{created.email}</p>
+              <input readOnly value={created.password} />
+            </div>
             <div className="modal-footer">
               <button
+                className="secondary"
                 onClick={() =>
                   void navigator.clipboard.writeText(created.password)
                 }
               >
                 {t("copy")}
               </button>
-              <button onClick={() => setCreated(null)}>{t("close")}</button>
+              <button className="primary" onClick={() => setCreated(null)}>
+                {t("close")}
+              </button>
             </div>
           </section>
         </div>
@@ -197,14 +206,19 @@ export function UserManagement({ api, t }: Props) {
       {confirm && (
         <div className="modal-overlay">
           <section className="modal form-modal" role="dialog" aria-modal="true">
-            <h2>{t(confirm.label)}</h2>
-            <p>{confirm.user.email}</p>
-            <p>{t("accountActionHint")}</p>
+            <div className="modal-heading">
+              <h2>{t(confirm.label)}</h2>
+            </div>
+            <div className="account-dialog-body">
+              <strong>{confirm.user.email}</strong>
+              <p>{t("accountActionHint")}</p>
+            </div>
             <div className="modal-footer">
               <button className="secondary" onClick={() => setConfirm(null)}>
                 {t("cancel")}
               </button>
               <button
+                className="primary"
                 disabled={busy}
                 onClick={() =>
                   void change(confirm.user, confirm.action, confirm.body)
@@ -235,7 +249,7 @@ export function AccountSettings({ api, t }: Props) {
       {done ? (
         <div>
           <p role="status">{t("passwordChanged")}</p>
-          <button onClick={() => window.location.reload()}>
+          <button className="primary" onClick={() => window.location.reload()}>
             {t("backToLogin")}
           </button>
         </div>
@@ -291,7 +305,9 @@ export function AccountSettings({ api, t }: Props) {
               required
             />
           </label>
-          <button disabled={busy}>{t("save")}</button>
+          <button className="primary" disabled={busy}>
+            {t("save")}
+          </button>
         </form>
       )}
     </section>

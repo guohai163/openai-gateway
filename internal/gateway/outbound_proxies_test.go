@@ -345,11 +345,26 @@ func TestBailianCatalogAndInferenceUseProxy(t *testing.T) {
 	if status, body := request(t, srv.URL, "POST", "/v1/chat/completions", "openai-g1", `{"model":"test-model","messages":[]}`); status != 200 {
 		t.Fatal(status, string(body))
 	}
-	if result, err := a.runUpstreamTest(ctx, "k1", "test-model"); err != nil || result.Error != "" || result.Output != "ok" {
+	if result, err := a.runUpstreamTest(ctx, "k1", "test-model"); err != nil || result.Error != "" || result.Output != "ok" || result.ProxyID != id || result.ProxyName == "" {
 		t.Fatal(result, err)
 	}
 	if calls.Load() != 3 {
 		t.Fatal("catalog, inference or test bypassed proxy", calls.Load())
+	}
+	if _, err := a.DB.Exec(ctx, "UPDATE outbound_proxies SET enabled=false WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := a.runUpstreamTest(ctx, "k1", "test-model"); err != nil || result.Error != "model_test_connection_failed" || result.ProxyID != id || calls.Load() != 3 {
+		t.Fatal("upstream test bypassed disabled proxy", result, err, calls.Load())
+	}
+	var socksCalls atomic.Int64
+	socks := socksProxyFixture(t, &socksCalls)
+	socksID := createTestProxy(t, a, socks.Addr().String(), "socks5")
+	if _, err := a.DB.Exec(ctx, "UPDATE upstream_keys SET proxy_id=$1 WHERE id='k1'", socksID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := a.runUpstreamTest(ctx, "k1", "test-model"); err != nil || result.Error != "" || result.Output != "ok" || result.ProxyID != socksID || socksCalls.Load() != 1 {
+		t.Fatal("upstream test did not use SOCKS5 proxy", result, err, socksCalls.Load())
 	}
 }
 
@@ -534,7 +549,7 @@ func TestOAuthProxyCoversAuthorizationRefreshModelsAndTest(t *testing.T) {
 	if err := a.completeOAuth(ctx, url.Values{"state": {authorization.Get("state")}, "client_id": {"oaiapp_proxy"}, "code": {"proxy-code"}}, "bootstrap", ""); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := a.testOAuthAccount(ctx, attempt["account_id"], "proxy-model"); err != nil || result.Error != "" || result.Output != "proxy-ok" {
+	if result, err := a.testOAuthAccount(ctx, attempt["account_id"], "proxy-model"); err != nil || result.Error != "" || result.Output != "proxy-ok" || result.ProxyID != id || result.ProxyName == "" {
 		t.Fatal(result, err)
 	}
 	if _, err := a.DB.Exec(ctx, "UPDATE oauth_accounts SET next_refresh_at=now()-interval '1 second' WHERE id=$1", attempt["account_id"]); err != nil {
@@ -562,6 +577,9 @@ func TestOAuthProxyCoversAuthorizationRefreshModelsAndTest(t *testing.T) {
 	}
 	if err := a.syncOAuthModels(ctx, attempt["account_id"]); err == nil || models.Load() != 1 {
 		t.Fatal("disabled OAuth proxy fell back", err, models.Load())
+	}
+	if result, err := a.testOAuthAccount(ctx, attempt["account_id"], "proxy-model"); err != nil || result.Error != "model_test_connection_failed" || result.ProxyID != id || inference.Load() != 1 {
+		t.Fatal("OAuth test bypassed disabled proxy", result, err, inference.Load())
 	}
 	for _, app := range []*App{a, other} {
 		for _, entry := range app.proxyTransports {

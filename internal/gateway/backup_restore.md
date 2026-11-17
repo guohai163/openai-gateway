@@ -13,18 +13,24 @@ S3 桶内的请求 JSON、域名配置、Nginx 配置和 HTTPS 证书需另外�
 
 从存储桶 backup-data/YYYY-MM/ 下载需要的完整日期备份，或使用后台手动下载的文件。
 将其放在当前目录，下面以重命名后的 gateway-backup.aigw 为例。定时备份使用当时保存的定时备份密码；
-手动下载使用生成时输入的密码。修改密码不会改变已有文件的解密密码。Bash 中执行：
+手动下载使用生成时输入的密码。修改密码不会改变已有文件的解密密码。
+下面的命令适用于 Bash 和 Zsh；先拉取明确版本，避免使用服务器上缓存的旧镜像。
+如备份来自更新的网关版本，请改用不低于源站的版本。按顺序执行：
 
 ```bash
-read -r -s -p '备份密码: ' BACKUP_PASSWORD
-export BACKUP_PASSWORD
+docker pull ghcr.io/guohai163/openai-gateway:1.25.1
+printf '备份密码: '
+IFS= read -r -s BACKUP_PASSWORD
 printf '\n'
-docker run --rm --user "$(id -u):$(id -g)" \
-  -e BACKUP_PASSWORD -v "$PWD:/restore" \
-  ghcr.io/guohai163/openai-gateway:latest \
-  backup-extract --file /restore/gateway-backup.aigw --out /restore/restored
+export BACKUP_PASSWORD
+docker run --rm --user "$(id -u):$(id -g)" -e BACKUP_PASSWORD -v "$PWD:/restore" ghcr.io/guohai163/openai-gateway:1.25.1 backup-extract --file /restore/gateway-backup.aigw --out /restore/restored
 unset BACKUP_PASSWORD
 ```
+
+输入密码时不会显示字符，输入完成后按回车。`gateway-backup.aigw` 应替换成实际下载的文件名，
+或先在当前目录将文件重命名；`restored` 输出目录必须不存在。
+如果看到 `MASTER_KEY must be a base64 encoded 32-byte key`，通常是运行了不支持解包的旧镜像，
+或 `backup-extract` 没有作为 `docker run` 的参数传入。请确认镜像版本，并整行复制上面的命令。
 
 也可先按上方方法输入并导出 BACKUP_PASSWORD，再用同版本或更新版本的本机二进制：
 
