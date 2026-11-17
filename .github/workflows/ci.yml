@@ -56,6 +56,8 @@ jobs:
           cp .github/scripts/pg-client.sh "$RUNNER_TEMP/pg-tools/pg_restore"
           chmod +x "$RUNNER_TEMP/pg-tools/pg_dump" "$RUNNER_TEMP/pg-tools/pg_restore"
           echo "$RUNNER_TEMP/pg-tools" >> "$GITHUB_PATH"
+      - name: Check restore configuration with Docker Compose
+        run: go test ./internal/gateway -run '^TestBackupEnvironmentPreservesComposeCredentials$' -count=1
       - name: PostgreSQL integration and race tests
         run: go test -race -count=1 ./...
       - name: Go static analysis
