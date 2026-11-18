@@ -532,13 +532,17 @@ func TestOAuthProxyCoversAuthorizationRefreshModelsAndTest(t *testing.T) {
 	var calls atomic.Int64
 	proxy := httpProxyFixture(t, origin, false, &calls)
 	id := createTestProxy(t, a, proxy.Listener.Addr().String(), "http")
-	status, body := admin.call(t, "POST", "oauth_accounts/authorize", `{"name":"proxied OAuth","proxy_id":"`+id+`"}`)
+	status, body := admin.call(t, "POST", "oauth_accounts/authorize", `{"name":"proxied OAuth","note":"OAuth 创建备注","proxy_id":"`+id+`"}`)
 	if status != 200 {
 		t.Fatal(status, string(body))
 	}
 	var attempt map[string]string
 	if err := json.Unmarshal(body, &attempt); err != nil {
 		t.Fatal(err)
+	}
+	var oauthNote string
+	if err := a.DB.QueryRow(ctx, "SELECT note FROM oauth_accounts WHERE id=$1", attempt["account_id"]).Scan(&oauthNote); err != nil || oauthNote != "OAuth 创建备注" {
+		t.Fatal("OAuth create note lost", err, oauthNote)
 	}
 	authorizeURL, _ := url.Parse(attempt["authorization_url"])
 	authorization = authorizeURL.Query()

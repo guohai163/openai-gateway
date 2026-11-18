@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -151,6 +152,12 @@ func (a *App) archiveRequest(ctx context.Context, k GatewayKey, r *http.Request,
 			}
 		}
 		if err := a.Storage.Put(ctx, path, data); err != nil {
+			status, reason := storageFailureReason(err)
+			direction := "input"
+			if isOutput {
+				direction = "output"
+			}
+			slog.Warn("request archive upload failed", "request_uuid", k.RequestUUID, "direction", direction, "reason", reason, "http_status", status)
 			return "failed"
 		}
 		return "stored"

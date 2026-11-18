@@ -18,7 +18,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 )
+
+func TestStorageFailureReasonRedactsDetails(t *testing.T) {
+	for _, test := range []struct {
+		err    error
+		status int
+		reason string
+	}{
+		{minio.ErrorResponse{StatusCode: 507, Code: "XMinioStorageFull", Message: "sensitive data"}, 507, "storage_full"},
+		{minio.ErrorResponse{StatusCode: 403, Code: "AccessDenied"}, 403, "access_denied"},
+		{minio.ErrorResponse{StatusCode: 413}, 413, "too_large"},
+		{errors.New("credential secret"), 0, "connection_or_storage_error"},
+	} {
+		status, reason := storageFailureReason(test.err)
+		if status != test.status || reason != test.reason {
+			t.Fatal(status, reason)
+		}
+	}
+}
 
 // A minimal S3 HTTP service exercises signed Put/Get/Delete using the real SDK.
 func fakeS3(t *testing.T) (*s3Storage, *sync.Map, *httptest.Server) {

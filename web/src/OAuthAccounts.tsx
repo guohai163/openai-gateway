@@ -12,6 +12,7 @@ type Props = {
 type Account = {
   id: string;
   name: string;
+  note: string;
   client_id: string;
   email: string;
   status: string;
@@ -35,6 +36,9 @@ type Attempt = {
 export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [editingNote, setEditingNote] = useState<Account | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const [proxies, setProxies] = useState<ProxyOption[]>([]);
   const [proxyID, setProxyID] = useState("");
   const [proxyReady, setProxyReady] = useState(false);
@@ -122,13 +126,16 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
       const result = await api("oauth_accounts/authorize", {
         method: "POST",
         body: JSON.stringify(
-          account ? { account_id: account.id } : { name, proxy_id: proxyID },
+          account
+            ? { account_id: account.id }
+            : { name, proxy_id: proxyID, note },
         ),
       });
       if (!mounted.current) return;
       setPending(result);
       setCallback("");
       setName("");
+      setNote("");
       await load();
     });
   }
@@ -179,6 +186,15 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t("oauthNamePlaceholder")}
+            />
+          </label>
+          <label>
+            {t("note")}
+            <input
+              maxLength={2000}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={t("notePlaceholder")}
             />
           </label>
           <ProxyChoice
@@ -271,6 +287,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
               <tr>
                 {[
                   "name",
+                  "note",
                   "status",
                   "proxy_name",
                   "expires_at",
@@ -293,6 +310,22 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
                         {account.client_id || t("pending")}
                       </code>
                     </div>
+                  </td>
+                  <td>
+                    <span className="resource-note" title={account.note || ""}>
+                      {account.note || "—"}
+                    </span>
+                    <button
+                      className="text-button"
+                      disabled={busy}
+                      onClick={() => {
+                        setEditingNote(account);
+                        setNoteDraft(account.note || "");
+                        setError("");
+                      }}
+                    >
+                      {t("edit")}
+                    </button>
                   </td>
                   <td>
                     <span
@@ -413,6 +446,68 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
           onUnauthorized={onUnauthorized}
           onClose={() => setTesting(null)}
         />
+      )}
+      {editingNote && (
+        <div className="modal-overlay">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("note")}
+          >
+            <div className="modal-heading">
+              <h2>
+                {editingNote.name} · {t("note")}
+              </h2>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void perform(async () => {
+                  await api(
+                    `oauth_accounts/${encodeURIComponent(editingNote.id)}`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ note: noteDraft }),
+                    },
+                  );
+                  if (!mounted.current) return;
+                  setEditingNote(null);
+                  await load();
+                });
+              }}
+            >
+              <div className="form-fields">
+                {error && (
+                  <p className="error-hint" role="alert">
+                    {t(error)}
+                  </p>
+                )}
+                <label>
+                  {t("note")}
+                  <textarea
+                    rows={3}
+                    maxLength={2000}
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setEditingNote(null)}
+                >
+                  {t("cancel")}
+                </button>
+                <button className="primary" disabled={busy}>
+                  {t("save")}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
       {editingProxy && (
         <div className="modal-overlay">

@@ -112,6 +112,7 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
               <tr>
                 {[
                   "name",
+                  "note",
                   "proxyProtocol",
                   "proxyAddress",
                   "proxyAuth",
@@ -128,6 +129,11 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.name}</td>
+                  <td>
+                    <span className="resource-note" title={row.note || ""}>
+                      {row.note || "—"}
+                    </span>
+                  </td>
                   <td>{row.protocol.toUpperCase()}</td>
                   <td>
                     <code>
@@ -169,7 +175,10 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
                               `proxies/${encodeURIComponent(row.id)}/test`,
                               { method: "POST", body: "{}" },
                             );
-                            if (mounted.current && sequence === testSequence.current)
+                            if (
+                              mounted.current &&
+                              sequence === testSequence.current
+                            )
                               setTestResult({
                                 name: row.name,
                                 loading: false,
@@ -180,7 +189,10 @@ export function ProxySettings({ api, t, onUnauthorized }: Props) {
                               e instanceof Error
                                 ? e.message
                                 : "proxy_test_failed";
-                            if (mounted.current && sequence === testSequence.current)
+                            if (
+                              mounted.current &&
+                              sequence === testSequence.current
+                            )
                               setTestResult({
                                 name: row.name,
                                 loading: false,
@@ -399,6 +411,16 @@ function ProxyForm({
                 required
                 maxLength={120}
                 defaultValue={row.name || ""}
+              />
+            </label>
+            <label>
+              {t("note")}
+              <textarea
+                name="note"
+                rows={3}
+                maxLength={2000}
+                defaultValue={row.note || ""}
+                placeholder={t("notePlaceholder")}
               />
             </label>
             <label>

@@ -580,6 +580,7 @@ function App() {
   const columns: Record<string, string[]> = {
     upstream_keys: [
       "name",
+      "note",
       "platform",
       "proxy_name",
       "enabled",
@@ -591,6 +592,7 @@ function App() {
     ],
     gateway_keys: [
       "name",
+      "note",
       ...(isAdmin ? ["owner_email"] : []),
       "month_cost",
       "keyBudget",
@@ -606,6 +608,7 @@ function App() {
   };
   function cell(c: string, r: Row) {
     const v = r[c];
+    if (c === "note") return <span className="resource-note" title={v || ""}>{v || "—"}</span>;
     if (c === "keyConcurrency") return <KeyConcurrencySummary row={r} t={t} />;
     if (c === "keyBudget") return <KeyBudgetSummary row={r} t={t} locale={locale} />;
     if (c === "keyRouting") return <span>{t(r.routing_mode === "primary_backup" ? "routingPrimaryBackup" : "routingRoundRobin")}<small className="routing-summary">{r.upstream_key_ids?.length ? t("routingSelectedCount").replace("{count}", String(r.upstream_key_ids.length)) : t("routingAllUpstreams")}</small></span>;
@@ -1355,6 +1358,7 @@ function App() {
                   page === "gateway_keys" ? "keyNameHint" : "",
                   !modal.id || page === "gateway_keys"
                 )}
+                <label>{t("note")}<textarea name="note" maxLength={2000} rows={3} defaultValue={modal.note || ""} placeholder={t("notePlaceholder")} /></label>
                 {page === "upstream_keys" && (
                   <>
                     <div className="platform-field">

@@ -134,10 +134,10 @@ SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
 // the month summaries for all those keys, preserving NUMERIC as decimal text.
 func (a *App) keyMonthlyQuery(resource string) string { return a.keyMonthlyScope(resource, false) }
 func (a *App) keyMonthlyScope(resource string, limited bool) string {
-	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,k.proxy_id,(SELECT name FROM outbound_proxies p WHERE p.id=k.proxy_id) AS proxy_name,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
+	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.note,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,k.proxy_id,(SELECT name FROM outbound_proxies p WHERE p.id=k.proxy_id) AS proxy_name,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
 	if resource == "gateway_keys" {
 		column = "gateway_key_id"
-		fields := `id,name,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal,spend_limits,max_concurrent_requests,
+		fields := `id,name,note,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal,spend_limits,max_concurrent_requests,
  coalesce(max_concurrent_requests,CASE WHEN spend_limits='{}'::jsonb THEN 0 ELSE 1 END) AS effective_max_concurrent_requests,
  (SELECT count(*) FROM gateway_budget_holds h WHERE h.gateway_key_id=gateway_keys.id AND h.active_until>now()) AS active_requests,
  (SELECT max(active_until) FROM gateway_budget_holds h WHERE h.gateway_key_id=gateway_keys.id AND h.active_until>now()) AS budget_hold_until,

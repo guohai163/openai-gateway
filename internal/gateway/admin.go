@@ -17,6 +17,7 @@ import (
 
 type resourceInput struct {
 	Name                  string          `json:"name"`
+	Note                  *string         `json:"note"`
 	Key                   string          `json:"key"`
 	Platform              string          `json:"platform"`
 	ProbeModel            *string         `json:"probe_model"`
@@ -326,6 +327,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	if create {
 		id = newID()
 	}
+	if in.Note != nil && len(*in.Note) > 2000 {
+		writeError(w, 400, "note_too_long")
+		return
+	}
 	name := strings.TrimSpace(in.Name)
 	if create && (name == "" || len(name) > 120) {
 		writeError(w, 400, "name_required")
@@ -368,7 +373,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 500, "encryption_failed")
 				return
 			}
-			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model,proxy_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel), in.ProxyID)
+			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model,proxy_id,note) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),coalesce($9,''))", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel), in.ProxyID, in.Note)
 		} else {
 			if in.Platform != "" {
 				var platform string
@@ -385,7 +390,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 					return
 				}
 			}
-			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model),proxy_id=CASE WHEN $5::text IS NULL THEN proxy_id ELSE nullif($5,'') END WHERE id=$1", id, name, in.Enabled, in.ProbeModel, in.ProxyID)
+			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model),proxy_id=CASE WHEN $5::text IS NULL THEN proxy_id ELSE nullif($5,'') END,note=coalesce($6,note) WHERE id=$1", id, name, in.Enabled, in.ProbeModel, in.ProxyID, in.Note)
 		}
 	case "gateway_keys":
 		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil || len(in.MaxConcurrentRequests) != 0) {
@@ -576,10 +581,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			var secret []byte
 			secret, e = seal(a.Config.MasterKey, token)
 			if e == nil {
-				tag, e = writer.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output,user_id,routing_mode,upstream_key_ids,prompt_cache_mode,prompt_cache_ttl) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false),$12,$13,$14,$15,$16)", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput, keyOwner(r), mode, ids, cacheMode, cacheTTL)
+				tag, e = writer.Exec(ctx, "INSERT INTO gateway_keys(id,name,token_hash,prefix,enabled,models,cidrs,expires_at,secret,store_input,store_output,user_id,routing_mode,upstream_key_ids,prompt_cache_mode,prompt_cache_ttl,note) VALUES($1,$2,$3,$4,$5,$6,$7::cidr[],$8,$9,coalesce($10,false),coalesce($11,false),$12,$13,$14,$15,$16,coalesce($17,''))", id, name, hash(token), token[:len(gatewayKeyPrefix)+8], enabled(in.Enabled), models, cidrs, expiry, secret, in.StoreInput, in.StoreOutput, keyOwner(r), mode, ids, cacheMode, cacheTTL, in.Note)
 			}
 		} else {
-			tag, e = writer.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output),routing_started_at=CASE WHEN routing_mode<>$10 OR upstream_key_ids<>$11::text[] THEN now() ELSE routing_started_at END,routing_mode=$10,upstream_key_ids=$11,prompt_cache_mode=$12,prompt_cache_ttl=$13 WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput, mode, ids, cacheMode, cacheTTL)
+			tag, e = writer.Exec(ctx, "UPDATE gateway_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),models=coalesce($4,models),cidrs=coalesce($5::cidr[],cidrs),expires_at=CASE WHEN $6 THEN $7::timestamptz ELSE expires_at END,store_input=coalesce($8,store_input),store_output=coalesce($9,store_output),routing_started_at=CASE WHEN routing_mode<>$10 OR upstream_key_ids<>$11::text[] THEN now() ELSE routing_started_at END,routing_mode=$10,upstream_key_ids=$11,prompt_cache_mode=$12,prompt_cache_ttl=$13,note=coalesce($14,note) WHERE id=$1 AND deleted_at IS NULL", id, name, in.Enabled, models, cidrs, changeExpiry, expiry, in.StoreInput, in.StoreOutput, mode, ids, cacheMode, cacheTTL, in.Note)
 		}
 	default:
 		writeError(w, 404, "not_found")

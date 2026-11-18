@@ -2724,6 +2724,7 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
 .account-form > button {
   justify-self: start;
 }
+.resource-note { display: -webkit-box; min-width: 120px; max-width: 220px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: pre-wrap; overflow-wrap: anywhere; }
 .account-dialog-body {
   display: grid;
   gap: 12px;

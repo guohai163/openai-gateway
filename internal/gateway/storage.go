@@ -125,6 +125,30 @@ func missingStorageObject(err error) bool {
 	return response.StatusCode == http.StatusNotFound || response.Code == "NoSuchKey" || response.Code == "NotFound"
 }
 
+// Log only a fixed set of reasons and the HTTP status, never raw storage
+// errors, credentials, object contents or service-provided messages.
+func storageFailureReason(err error) (int, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 0, "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return 0, "canceled"
+	}
+	response := minio.ToErrorResponse(err)
+	switch {
+	case response.StatusCode == 507 || response.Code == "XMinioStorageFull" || response.Code == "InsufficientStorage":
+		return response.StatusCode, "storage_full"
+	case response.StatusCode == 403 || response.Code == "AccessDenied":
+		return response.StatusCode, "access_denied"
+	case response.StatusCode == 413 || response.Code == "EntityTooLarge":
+		return response.StatusCode, "too_large"
+	case response.StatusCode >= 400 && response.StatusCode <= 599:
+		return response.StatusCode, "storage_service_error"
+	default:
+		return 0, "connection_or_storage_error"
+	}
+}
+
 func (a *App) storageTest(w http.ResponseWriter, r *http.Request) {
 	if a.Storage == nil {
 		writeError(w, 404, "not_found")

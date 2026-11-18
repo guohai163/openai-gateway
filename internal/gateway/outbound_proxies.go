@@ -178,7 +178,7 @@ func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		var data []byte
 		err := a.DB.QueryRow(ctx, `SELECT coalesce(json_agg(t ORDER BY t.created_at,t.id),'[]') FROM (
- SELECT p.id,p.name,p.protocol,p.host,p.port,p.username,p.password IS NOT NULL AS has_password,p.enabled,p.expires_at,p.created_at,
+ SELECT p.id,p.name,p.note,p.protocol,p.host,p.port,p.username,p.password IS NOT NULL AS has_password,p.enabled,p.expires_at,p.created_at,
  CASE WHEN NOT p.enabled THEN 'disabled' WHEN p.expires_at<=now() THEN 'expired' ELSE 'active' END AS status,
  (SELECT count(*) FROM upstream_keys k WHERE k.proxy_id=p.id)+(SELECT count(*) FROM oauth_accounts a WHERE a.proxy_id=p.id) AS usage_count
  FROM outbound_proxies p) t`).Scan(&data)
@@ -221,6 +221,7 @@ func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	}
 	var in struct {
 		Name      string     `json:"name"`
+		Note      *string    `json:"note"`
 		Protocol  string     `json:"protocol"`
 		Host      string     `json:"host"`
 		Port      int        `json:"port"`
@@ -230,6 +231,10 @@ func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string
 		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	if in.Note != nil && len(*in.Note) > 2000 {
+		writeError(w, 400, "note_too_long")
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
@@ -273,9 +278,9 @@ func (a *App) proxyRoutes(w http.ResponseWriter, r *http.Request, parts []string
 		secret = nil
 	}
 	if create {
-		_, err = tx.Exec(ctx, `INSERT INTO outbound_proxies(id,name,protocol,host,port,username,password,enabled,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, in.Name, in.Protocol, in.Host, in.Port, in.Username, secret, enabled(in.Enabled), in.ExpiresAt)
+		_, err = tx.Exec(ctx, `INSERT INTO outbound_proxies(id,name,protocol,host,port,username,password,enabled,expires_at,note) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,coalesce($10,''))`, id, in.Name, in.Protocol, in.Host, in.Port, in.Username, secret, enabled(in.Enabled), in.ExpiresAt, in.Note)
 	} else {
-		_, err = tx.Exec(ctx, `UPDATE outbound_proxies SET name=$2,protocol=$3,host=$4,port=$5,username=$6,password=$7,enabled=coalesce($8,enabled),expires_at=$9,version=version+1 WHERE id=$1`, id, in.Name, in.Protocol, in.Host, in.Port, in.Username, secret, in.Enabled, in.ExpiresAt)
+		_, err = tx.Exec(ctx, `UPDATE outbound_proxies SET name=$2,protocol=$3,host=$4,port=$5,username=$6,password=$7,enabled=coalesce($8,enabled),expires_at=$9,note=coalesce($10,note),version=version+1 WHERE id=$1`, id, in.Name, in.Protocol, in.Host, in.Port, in.Username, secret, in.Enabled, in.ExpiresAt, in.Note)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
