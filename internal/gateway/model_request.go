@@ -25,6 +25,7 @@ type modelTestResult struct {
 	Detail     string `json:"detail"`
 	ProxyID    string `json:"proxy_id"`
 	ProxyName  string `json:"proxy_name"`
+	Usage      Usage  `json:"-"`
 }
 
 type modelTestError struct {
@@ -168,6 +169,13 @@ func readModelTestStream(body io.Reader, result *modelTestResult, chat bool) str
 		}
 		if json.Unmarshal([]byte(raw), &event) != nil {
 			return "model_test_invalid_response"
+		}
+		if event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed" {
+			var envelope map[string]any
+			if json.Unmarshal([]byte(raw), &envelope) == nil {
+				response, _ := envelope["response"].(map[string]any)
+				result.Usage = usageFrom(response)
+			}
 		}
 		switch event.Type {
 		case "response.output_text.delta", "response.refusal.delta":

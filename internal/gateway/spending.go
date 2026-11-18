@@ -25,6 +25,22 @@ func (a *App) monthRange() (time.Time, time.Time) {
 // All ranges are [start,end). Date-only end values include that local day.
 func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id string) {
 	start, end := a.monthRange()
+	kind := "inference"
+	if resource == "oauth_accounts" {
+		kind = "oauth_test"
+	}
+	if resource == "upstream_keys" || resource == "oauth_accounts" {
+		if ordinary(r) {
+			writeError(w, 404, "not_found")
+			return
+		}
+		var day int
+		if err := a.DB.QueryRow(r.Context(), "SELECT billing_cycle_day FROM "+resource+" WHERE id=$1", id).Scan(&day); err != nil {
+			oauthAdminError(w, err)
+			return
+		}
+		start, end = billingCycleRange(time.Now().In(a.reportLocation()), day)
+	}
 	if from, to := r.URL.Query().Get("from"), r.URL.Query().Get("to"); from != "" || to != "" {
 		var err error
 		start, err = time.ParseInLocation("2006-01-02", from, a.reportLocation())
@@ -56,23 +72,24 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
 			writeError(w, 404, "not_found")
 			return
 		}
-		if resource != "upstream_keys" && resource != "gateway_keys" {
-			writeError(w, 404, "not_found")
-			return
-		}
-		var exists bool
-		err := a.DB.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM "+resource+" WHERE id=$1)", id).Scan(&exists)
-		if err != nil {
-			adminDBError(w, err)
-			return
-		}
-		if !exists {
+		if resource != "upstream_keys" && resource != "gateway_keys" && resource != "oauth_accounts" {
 			writeError(w, 404, "not_found")
 			return
 		}
 		column := "upstream_key_id"
 		if resource == "gateway_keys" {
+			var exists bool
+			if err := a.DB.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM gateway_keys WHERE id=$1)", id).Scan(&exists); err != nil {
+				adminDBError(w, err)
+				return
+			}
+			if !exists {
+				writeError(w, 404, "not_found")
+				return
+			}
 			column = "gateway_key_id"
+		} else if resource == "oauth_accounts" {
+			column = "oauth_account_id"
 		}
 		if ordinary(r) {
 			filter += " AND " + column + "=$5"
@@ -83,7 +100,7 @@ func (a *App) spending(w http.ResponseWriter, r *http.Request, resource, id stri
 	}
 	var data []byte
 	err := a.DB.QueryRow(r.Context(), `WITH filtered AS (
- SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs WHERE kind='inference' AND created_at >= $1 AND created_at < $2`+filter+`
+ SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs WHERE kind='`+kind+`' AND created_at >= $1 AND created_at < $2`+filter+`
 ), grouped AS (
  SELECT platform,model,currency,count(DISTINCT coalesce(request_uuid::text,id))::bigint AS requests,
  count(*) FILTER(WHERE status<400)::bigint AS successful_requests,
@@ -131,10 +148,24 @@ SELECT json_build_object('from',$1::timestamptz,'to',$2::timestamptz,
 }
 
 // Executed only for the page of keys being displayed. A single query computes
-// the month summaries for all those keys, preserving NUMERIC as decimal text.
+// the cycle summaries for all those keys, preserving NUMERIC as decimal text.
 func (a *App) keyMonthlyQuery(resource string) string { return a.keyMonthlyScope(resource, false) }
 func (a *App) keyMonthlyScope(resource string, limited bool) string {
-	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.note,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,k.proxy_id,(SELECT name FROM outbound_proxies p WHERE p.id=k.proxy_id) AS proxy_name,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
+	column, base := "upstream_key_id", `SELECT k.id,k.platform,k.name,k.note,k.probe_model,k.enabled,k.invalid,k.quota_blocked,k.last_error,k.model_synced_at,k.model_sync_error,k.next_probe_at,k.probe_failures,k.created_at,k.proxy_id,k.billing_cycle_day,(SELECT name FROM outbound_proxies p WHERE p.id=k.proxy_id) AS proxy_name,(SELECT coalesce(json_agg(model ORDER BY model),'[]') FROM models WHERE upstream_key_id=k.id) AS models FROM upstream_keys k`
+	kind := "inference"
+	selection := ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+	order := `t.created_at DESC`
+	if resource == "oauth_accounts" {
+		column, kind = "oauth_account_id", "oauth_test"
+		selection = ""
+		order = "t.created_at,t.id"
+		base = `SELECT id,name,note,client_id,email,subject,scopes,expires_at,next_refresh_at,last_refreshed_at,
+ refresh_error,model_synced_at,model_sync_error,created_at,proxy_id,billing_cycle_day,
+ (SELECT name FROM outbound_proxies p WHERE p.id=oauth_accounts.proxy_id) AS proxy_name,jsonb_array_length(model_catalog) AS model_count,
+ CASE WHEN credentials IS NULL THEN 'disconnected'
+      WHEN NOT ('chatgpt.tokens.use.direct'=ANY(scopes)) THEN 'permission_required'
+      WHEN expires_at<=now() THEN 'expired' ELSE 'connected' END AS status FROM oauth_accounts`
+	}
 	if resource == "gateway_keys" {
 		column = "gateway_key_id"
 		fields := `id,name,note,prefix,enabled,models,ARRAY(SELECT x::text FROM unnest(cidrs) x) AS cidrs,expires_at,created_at,secret IS NOT NULL AS can_reveal,spend_limits,max_concurrent_requests,
@@ -150,9 +181,15 @@ func (a *App) keyMonthlyScope(resource string, limited bool) string {
 		}
 		base = `SELECT ` + fields + ` FROM gateway_keys WHERE ` + filter
 	}
-	return `WITH selected AS (` + base + ` ORDER BY created_at DESC LIMIT $1 OFFSET $2), filtered AS (
- SELECT *,coalesce(nullif(pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs
- WHERE kind='inference' AND created_at >= $3 AND created_at < $4 AND ` + column + ` IN (SELECT id FROM selected)
+	periods := `SELECT *, $3::timestamptz AS billing_cycle_start,$4::timestamptz AS billing_cycle_end FROM selected`
+	if resource != "gateway_keys" {
+		periods = `SELECT *, ` + a.billingCycleStartSQL("billing_cycle_day", "now()") + ` AS billing_cycle_start FROM selected`
+		periods = `SELECT *,` + a.billingCycleBoundarySQL("billing_cycle_day", "(date_trunc('month',billing_cycle_start AT TIME ZONE "+a.billingTimezoneSQL()+")+interval '1 month')") + ` AS billing_cycle_end FROM (` + periods + `) starts`
+	}
+	return `WITH selected AS (` + base + selection + `), periods AS (` + periods + `), filtered AS (
+ SELECT l.*,coalesce(nullif(l.pricing_snapshot->>'currency',''),'USD') AS currency FROM request_logs l
+ JOIN periods s ON s.id=l.` + column + `
+ WHERE l.kind='` + kind + `' AND l.created_at >= s.billing_cycle_start AND l.created_at < s.billing_cycle_end
 ), usage AS (
  SELECT ` + column + ` AS key_id,count(DISTINCT coalesce(request_uuid::text,id)) AS requests,
  CASE WHEN count(DISTINCT currency)=1 THEN min(currency) END AS currency,
@@ -163,10 +200,11 @@ func (a *App) keyMonthlyScope(resource string, limited bool) string {
  SELECT ` + column + ` AS key_id,currency,sum(total_cost)::text AS cost FROM filtered GROUP BY ` + column + `,currency
 ), totals AS (
  SELECT key_id,json_object_agg(currency,cost) FILTER(WHERE cost IS NOT NULL) AS totals_by_currency FROM currency_totals GROUP BY key_id
-) SELECT coalesce(json_agg(t),'[]'::json) FROM (
- SELECT s.*,coalesce(u.requests,0) AS month_requests,u.cost AS month_cost,u.currency AS month_currency,
+) SELECT coalesce(json_agg(t ORDER BY ` + order + `),'[]'::json) FROM (
+ SELECT s.*,to_char(s.billing_cycle_start AT TIME ZONE ` + a.billingTimezoneSQL() + `,'YYYY-MM-DD') AS billing_cycle_start_date,
+ coalesce(u.requests,0) AS month_requests,u.cost AS month_cost,u.currency AS month_currency,
  coalesce(totals.totals_by_currency,'{}'::json) AS month_totals_by_currency,
- coalesce(u.unknown,0) AS month_unknown FROM selected s LEFT JOIN usage u ON u.key_id=s.id
- LEFT JOIN totals ON totals.key_id=s.id ORDER BY s.created_at DESC
+ coalesce(u.unknown,0) AS month_unknown FROM periods s LEFT JOIN usage u ON u.key_id=s.id
+ LEFT JOIN totals ON totals.key_id=s.id
 ) t`
 }

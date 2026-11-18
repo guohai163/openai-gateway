@@ -34,6 +34,7 @@ type resourceInput struct {
 	SpendLimits           *spendLimits    `json:"spend_limits"`
 	MaxConcurrentRequests json.RawMessage `json:"max_concurrent_requests,omitempty"`
 	ProxyID               *string         `json:"proxy_id"`
+	BillingCycleDay       *int            `json:"billing_cycle_day"`
 }
 
 var privateKeyNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,120}$`)
@@ -286,8 +287,11 @@ func (a *App) adminList(w http.ResponseWriter, r *http.Request, resource string)
 	var b []byte
 	var e error
 	if resource == "upstream_keys" || resource == "gateway_keys" {
-		start, end := a.monthRange()
-		e = a.DB.QueryRow(r.Context(), a.keyMonthlyQuery(resource), limit, offset, start, end).Scan(&b)
+		if resource == "gateway_keys" {
+			start, end := a.monthRange()
+			args = append(args, start, end)
+		}
+		e = a.DB.QueryRow(r.Context(), a.keyMonthlyQuery(resource), args...).Scan(&b)
 	} else {
 		e = a.DB.QueryRow(r.Context(), "SELECT coalesce(json_agg(t),'[]'::json) FROM ("+q+" LIMIT $1 OFFSET $2) t", args...).Scan(&b)
 	}
@@ -349,6 +353,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 	} = a.DB
 	switch resource {
 	case "upstream_keys":
+		if in.BillingCycleDay != nil && (*in.BillingCycleDay < 1 || *in.BillingCycleDay > 31) {
+			writeError(w, 400, "invalid_billing_cycle_day")
+			return
+		}
 		if in.ProxyID != nil {
 			if err := a.validateProxySelection(ctx, *in.ProxyID); err != nil {
 				proxyAdminError(w, err)
@@ -373,7 +381,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 500, "encryption_failed")
 				return
 			}
-			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model,proxy_id,note) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),coalesce($9,''))", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel), in.ProxyID, in.Note)
+			tag, e = a.DB.Exec(ctx, "INSERT INTO upstream_keys(id,name,secret,fingerprint,platform,enabled,probe_model,proxy_id,note,billing_cycle_day) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),coalesce($9,''),coalesce($10,1))", id, name, secret, hash(in.Key), platform, enabled(in.Enabled), optionalString(in.ProbeModel), in.ProxyID, in.Note, in.BillingCycleDay)
 		} else {
 			if in.Platform != "" {
 				var platform string
@@ -390,7 +398,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 					return
 				}
 			}
-			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model),proxy_id=CASE WHEN $5::text IS NULL THEN proxy_id ELSE nullif($5,'') END,note=coalesce($6,note) WHERE id=$1", id, name, in.Enabled, in.ProbeModel, in.ProxyID, in.Note)
+			tag, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET name=coalesce(nullif($2,''),name),enabled=coalesce($3,enabled),probe_model=coalesce($4,probe_model),proxy_id=CASE WHEN $5::text IS NULL THEN proxy_id ELSE nullif($5,'') END,note=coalesce($6,note),billing_cycle_day=coalesce($7,billing_cycle_day) WHERE id=$1", id, name, in.Enabled, in.ProbeModel, in.ProxyID, in.Note, in.BillingCycleDay)
 		}
 	case "gateway_keys":
 		if ordinary(r) && (in.StoreInput != nil || in.StoreOutput != nil || in.RoutingMode != nil || in.UpstreamKeyIDs != nil || in.PromptCacheMode != nil || in.PromptCacheTTL != nil || in.SpendLimits != nil || len(in.MaxConcurrentRequests) != 0) {

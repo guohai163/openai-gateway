@@ -22,12 +22,21 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(parts) == 3 && parts[2] == "spending" && r.Method == http.MethodGet {
+		a.spending(w, r, "oauth_accounts", parts[1])
+		return
+	}
 	if len(parts) == 2 && r.Method == http.MethodPatch {
 		var in struct {
-			ProxyID *string `json:"proxy_id"`
-			Note    *string `json:"note"`
+			ProxyID         *string `json:"proxy_id"`
+			Note            *string `json:"note"`
+			BillingCycleDay *int    `json:"billing_cycle_day"`
 		}
 		if !decode(w, r, &in) {
+			return
+		}
+		if in.BillingCycleDay != nil && (*in.BillingCycleDay < 1 || *in.BillingCycleDay > 31) {
+			writeError(w, 400, "invalid_billing_cycle_day")
 			return
 		}
 		if in.Note != nil && len(*in.Note) > 2000 {
@@ -60,7 +69,7 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 			writeError(w, 409, "oauth_attempt_busy")
 			return
 		}
-		_, err = tx.Exec(ctx, "UPDATE oauth_accounts SET proxy_id=CASE WHEN $2::text IS NULL THEN proxy_id ELSE nullif($2,'') END,note=coalesce($3,note) WHERE id=$1", id, in.ProxyID, in.Note)
+		_, err = tx.Exec(ctx, "UPDATE oauth_accounts SET proxy_id=CASE WHEN $2::text IS NULL THEN proxy_id ELSE nullif($2,'') END,note=coalesce($3,note),billing_cycle_day=coalesce($4,billing_cycle_day) WHERE id=$1", id, in.ProxyID, in.Note, in.BillingCycleDay)
 		if err == nil {
 			err = tx.Commit(ctx)
 		}
@@ -68,7 +77,11 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 			adminDBError(w, err)
 			return
 		}
-		a.audit(ctx, "update_proxy", "oauth_accounts", id)
+		action := "update_proxy"
+		if in.BillingCycleDay != nil {
+			action = "update_billing_cycle"
+		}
+		a.audit(ctx, action, "oauth_accounts", id)
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
@@ -90,13 +103,7 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		var data []byte
-		err := a.DB.QueryRow(ctx, `SELECT coalesce(json_agg(t ORDER BY t.created_at,t.id),'[]') FROM (
- SELECT id,name,note,client_id,email,subject,scopes,expires_at,next_refresh_at,last_refreshed_at,
- refresh_error,model_synced_at,model_sync_error,created_at,proxy_id,(SELECT name FROM outbound_proxies p WHERE p.id=oauth_accounts.proxy_id) AS proxy_name,jsonb_array_length(model_catalog) AS model_count,
- CASE WHEN credentials IS NULL THEN 'disconnected'
-      WHEN NOT ('chatgpt.tokens.use.direct'=ANY(scopes)) THEN 'permission_required'
-      WHEN expires_at<=now() THEN 'expired' ELSE 'connected' END AS status
- FROM oauth_accounts) t`).Scan(&data)
+		err := a.DB.QueryRow(ctx, a.keyMonthlyQuery("oauth_accounts")).Scan(&data)
 		if err != nil {
 			adminDBError(w, err)
 			return
@@ -106,19 +113,24 @@ func (a *App) oauthRoutes(w http.ResponseWriter, r *http.Request, parts []string
 	}
 	if len(parts) == 2 && parts[1] == "authorize" && r.Method == http.MethodPost {
 		var in struct {
-			Name      string  `json:"name"`
-			AccountID string  `json:"account_id"`
-			ProxyID   *string `json:"proxy_id"`
-			Note      *string `json:"note"`
+			Name            string  `json:"name"`
+			AccountID       string  `json:"account_id"`
+			ProxyID         *string `json:"proxy_id"`
+			Note            *string `json:"note"`
+			BillingCycleDay *int    `json:"billing_cycle_day"`
 		}
 		if !decode(w, r, &in) {
+			return
+		}
+		if in.BillingCycleDay != nil && (*in.BillingCycleDay < 1 || *in.BillingCycleDay > 31) {
+			writeError(w, 400, "invalid_billing_cycle_day")
 			return
 		}
 		if in.Note != nil && len(*in.Note) > 2000 {
 			writeError(w, 400, "note_too_long")
 			return
 		}
-		result, err := a.beginOAuth(ctx, actor(r).ID, strings.TrimSpace(in.Name), in.AccountID, in.ProxyID, in.Note)
+		result, err := a.beginOAuth(ctx, actor(r).ID, strings.TrimSpace(in.Name), in.AccountID, in.ProxyID, in.Note, in.BillingCycleDay)
 		if err != nil {
 			oauthAdminError(w, err)
 			return
@@ -206,7 +218,7 @@ func oauthAdminError(w http.ResponseWriter, err error) {
 	adminDBError(w, err)
 }
 
-func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string, proxyID, note *string) (map[string]any, error) {
+func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string, proxyID, note *string, billingDay *int) (map[string]any, error) {
 	if accountID == "" && (name == "" || len(name) > 120) {
 		return nil, errors.New("oauth_name_required")
 	}
@@ -236,7 +248,7 @@ func (a *App) beginOAuth(ctx context.Context, actorID, name, accountID string, p
 	}
 	if accountID == "" {
 		accountID = newID()
-		_, err = tx.Exec(ctx, "INSERT INTO oauth_accounts(id,name,proxy_id,note) VALUES($1,$2,nullif($3,''),coalesce($4,''))", accountID, name, proxyID, note)
+		_, err = tx.Exec(ctx, "INSERT INTO oauth_accounts(id,name,proxy_id,note,billing_cycle_day) VALUES($1,$2,nullif($3,''),coalesce($4,''),coalesce($5,1))", accountID, name, proxyID, note, billingDay)
 	} else {
 		err = tx.QueryRow(ctx, "SELECT client_id,email,credentials,scopes FROM oauth_accounts WHERE id=$1 FOR UPDATE", accountID).Scan(&clientID, &email, &secret, &scopes)
 	}

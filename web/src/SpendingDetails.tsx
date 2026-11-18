@@ -48,6 +48,8 @@ export function SpendingDetails({
     [loading, setLoading] = useState(false);
   const [customRange, setCustomRange] = useState(false);
   const [monthStart, setMonthStart] = useState("");
+  const billingCycle =
+    resource === "upstream_keys" || resource === "oauth_accounts";
   const path =
     resource && resourceId ? `${resource}/${resourceId}/spending` : "spending";
   const n = (value: number) => new Intl.NumberFormat(locale).format(value || 0);
@@ -66,7 +68,7 @@ export function SpendingDetails({
           day: "2-digit",
         }).format(new Date(value));
       setFrom(localDate(result.from));
-      if (!query) setMonthStart(localDate(result.from));
+      if (!query) setMonthStart(localDate(new Date().toISOString()));
       setTo(
         localDate(new Date(new Date(result.to).getTime() - 1).toISOString()),
       );
@@ -99,7 +101,13 @@ export function SpendingDetails({
         <div className="monthly-spending-heading">
           <div>
             <span className="eyebrow">
-              {t(customRange ? "selectedRangeSpend" : "calendarMonthSpend")}
+              {t(
+                customRange
+                  ? "selectedRangeSpend"
+                  : billingCycle
+                    ? "billingCycleCost"
+                    : "calendarMonthSpend",
+              )}
             </span>
             <strong>{summaryCost}</strong>
             <small>
@@ -157,7 +165,7 @@ export function SpendingDetails({
               disabled={loading}
               onClick={() => void load()}
             >
-              {t("currentCalendarMonth")}
+              {t(billingCycle ? "currentBillingCycle" : "currentCalendarMonth")}
             </button>
             <button
               className="text-button"

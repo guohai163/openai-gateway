@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestOAuthTestResponsesProtocol(t *testing.T) {
@@ -153,5 +154,48 @@ func TestOAuthAccountTestIsolationAndAccess(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatal("invalid requests reached upstream", calls.Load())
+	}
+}
+
+func TestOAuthTestCostsAppearInAccountCycleOnly(t *testing.T) {
+	a, _, admin := oauthIntegrationApp(t)
+	ctx := context.Background()
+	seedTestPrice(t, a)
+	secret, _ := seal(a.Config.MasterKey, `{"access_token":"test-access"}`)
+	if _, err := a.DB.Exec(ctx, `INSERT INTO oauth_accounts(id,name,credentials,scopes,expires_at,next_refresh_at,model_catalog)
+ VALUES('priced','Priced OAuth',$1,$2,now()+interval '1 hour',now()+interval '55 minutes','[{"slug":"test-model"}]')`, secret, strings.Fields(oauthScopes)); err != nil {
+		t.Fatal(err)
+	}
+	a.Client = oauthFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `data: {"type":"response.completed","response":{"model":"test-model","usage":{"input_tokens":1000,"output_tokens":100,"input_tokens_details":{"cached_tokens":800}}}}`+"\n\n")
+	})
+	if status, raw := admin.call(t, "POST", "oauth_accounts/priced/test", `{"model":"test-model"}`); status != 200 {
+		t.Fatal(status, string(raw))
+	}
+	var cost, kind string
+	var tokens int
+	if err := a.DB.QueryRow(ctx, "SELECT total_cost::text,kind,input_tokens FROM request_logs WHERE oauth_account_id='priced'").Scan(&cost, &kind, &tokens); err != nil || cost != "0.0016000000000000" || kind != "oauth_test" || tokens != 1000 {
+		t.Fatal("OAuth completion usage or price missing", cost, kind, tokens, err)
+	}
+	status, raw := admin.call(t, "GET", "oauth_accounts/priced/spending", "")
+	var detail struct {
+		Summary struct {
+			Cost     string `json:"total_cost"`
+			Requests int    `json:"requests"`
+		}
+	}
+	if err := json.Unmarshal(raw, &detail); err != nil || status != 200 || detail.Summary.Cost != cost || detail.Summary.Requests != 1 {
+		t.Fatal(status, string(raw), err)
+	}
+	if err := a.persistOAuthTest(ctx, "priced", "unpriced-model", time.Now(), modelTestResult{HTTPStatus: 200}); err != nil {
+		t.Fatal(err)
+	}
+	var unknown int
+	if err := a.DB.QueryRow(ctx, "SELECT count(*) FROM request_logs WHERE oauth_account_id='priced' AND total_cost IS NULL").Scan(&unknown); err != nil || unknown != 1 {
+		t.Fatal("missing usage must stay unknown", unknown, err)
+	}
+	status, raw = admin.call(t, "GET", "spending", "")
+	if err := json.Unmarshal(raw, &detail); err != nil || status != 200 || detail.Summary.Requests != 0 {
+		t.Fatal("OAuth tests entered gateway inference totals", status, string(raw), err)
 	}
 }

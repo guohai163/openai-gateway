@@ -25,7 +25,7 @@ func logFilterWhere(values url.Values, userID string, scoped bool) (string, []an
 	}
 	for _, field := range []string{"model", "gateway_key_id", "owner_id", "upstream_key_id", "kind", "error_code"} {
 		if value := values.Get(field); value != "" {
-			if len(value) > 512 || (field == "kind" && value != "inference" && value != "probe" && value != "anomaly") {
+			if len(value) > 512 || (field == "kind" && value != "inference" && value != "probe" && value != "anomaly" && value != "oauth_test") {
 				return "", nil, fmt.Errorf("invalid_log_filters")
 			}
 			add(field+"=$%d", value)

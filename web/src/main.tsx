@@ -48,7 +48,7 @@ import {
   type LogFilterValues,
   type LogFilterOptions,
 } from "./LogFilters";
-import { SpendingDetails, formatTotals, money } from "./SpendingDetails";
+import { SpendingDetails } from "./SpendingDetails";
 import { StorageSettings } from "./StorageSettings";
 import { BackupSettings } from "./BackupSettings";
 import { OverviewAnalytics } from "./OverviewAnalytics";
@@ -60,6 +60,7 @@ import { KeyConcurrencyFields, KeyConcurrencySummary } from "./KeyConcurrencyFie
 import { RequestStatus } from "./RequestStatus";
 import { UserManagement, AccountSettings } from "./UserManagement";
 import { OAuthAccounts } from "./OAuthAccounts";
+import { BillingCycleField, KeySpendButton } from "./BillingCycleFields";
 import { ProxySettings } from "./ProxySettings";
 import { ProxySelect } from "./ProxySelect";
 import { ModelRequestTest } from "./ModelRequestTest";
@@ -390,6 +391,7 @@ function App() {
     if (page === "upstream_keys") {
       if (input.proxy_ready !== "true") { setError("proxy_load_failed"); return; }
       delete input.proxy_ready;
+      input.billing_cycle_day = Number(input.billing_cycle_day);
     }
     if (page === "gateway_keys") {
       if (isAdmin) {
@@ -627,37 +629,8 @@ function App() {
     if (c === "user_agent")
       return <span className="request-user-agent" title={v}>{v || "—"}</span>;
     if (c === "month_cost")
-      return (
-        <button
-          className="key-spend-button"
-          type="button"
-          aria-expanded={expandedKey === r.id}
-          onClick={() => setExpandedKey(expandedKey === r.id ? null : r.id)}
-        >
-          <strong>
-            {Number(r.month_requests) === 0
-              ? money(0, locale, r.month_currency || "USD")
-              : Object.keys(r.month_totals_by_currency || {}).length
-                ? formatTotals(r.month_totals_by_currency, locale)
-                : r.month_cost == null
-                  ? t("unknown")
-                  : money(r.month_cost, locale, r.month_currency || "USD")}
-          </strong>
-          <small>
-            {t("currentCalendarMonth")}
-            {r.month_unknown > 0
-              ? " · " +
-                t("partialEstimate").replace(
-                  "{currency}",
-                  r.month_currency ||
-                    Object.keys(r.month_totals_by_currency || {}).join(" / ") ||
-                    "USD",
-                )
-              : ""}
-          </small>
-          <span>{t(expandedKey === r.id ? "lessDetails" : "moreDetails")}</span>
-        </button>
-      );
+      return <KeySpendButton row={r} locale={locale} t={t} expanded={expandedKey === r.id}
+        billingCycle={page === "upstream_keys"} onClick={() => setExpandedKey(expandedKey === r.id ? null : r.id)} />;
     if (c === "request_uuid" || c === "credential_fingerprint") return <code title={v}>{v || "—"}</code>;
     if (r.kind === "anomaly" && c === "error_code") return <span title={v}>{t(`anomaly_${v}`)}</span>;
     if (r.kind === "anomaly" && c === "endpoint") return <code>{r.method} {v}</code>;
@@ -937,7 +910,7 @@ function App() {
           {page === "proxies" ? (
             <ProxySettings api={api} t={t} onUnauthorized={signOut} />
           ) : page === "oauth_accounts" ? (
-            <OAuthAccounts api={api} t={t} onUnauthorized={signOut} />
+            <OAuthAccounts api={api} t={t} locale={locale} onUnauthorized={signOut} />
           ) : page === "pricing" ? (
             <ModelPricing
               api={api}
@@ -1125,7 +1098,7 @@ function App() {
                   <thead>
                     <tr>
                       {columns[page]?.map((c) => (
-                        <th key={c} data-column={c}>{t(page === "logs" && logFilters.kind === "anomaly" && c === "error_code" ? "anomalyReason" : c)}</th>
+                        <th key={c} data-column={c}>{t(page === "logs" && logFilters.kind === "anomaly" && c === "error_code" ? "anomalyReason" : page === "upstream_keys" && c === "month_cost" ? "billingCycleCost" : c)}</th>
                       ))}
                       {canAdd && (
                         <th className="actions-column">{t("actions")}</th>
@@ -1259,6 +1232,7 @@ function App() {
                             <tr className="key-spending-row">
                               <td colSpan={(columns[page]?.length || 0) + 1}>
                                 <SpendingDetails
+                                  key={`${r.id}-${r.billing_cycle_day || 1}`}
                                   api={api}
                                   t={t}
                                   locale={locale}
@@ -1373,6 +1347,7 @@ function App() {
                       <small>{t("channelHint")}</small>
                     </div>
                     <ProxySelect key={`proxy-${modal.id || "new"}`} api={api} initialValue={modal.proxy_id} t={t} />
+                    <BillingCycleField defaultValue={modal.billing_cycle_day || 1} t={t} />
                     {!modal.id &&
                       field("key", "password", "upstreamHint", true)}
                     {field("probe_model", "text", "probeHint")}

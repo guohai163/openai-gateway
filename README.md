@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.23.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.23.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.23.0`。
+最新版本：[v1.28.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.28.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.28.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -496,9 +496,13 @@ curl --fail http://127.0.0.1:8080/healthz
 
 首版运行一个 Go 实例。轮询游标与登录限速在进程内；状态、额度、探测计划和会话在 PostgreSQL。需要多副本时应先增加共享调度、探测锁和分布式登录限速。
 
-## 自然月消费与按模型查询
+## 计费周期与按模型查询
 
-概览、上游密钥和私有密钥提供自然月 Token 费用统计。密钥列表直接显示当月已知费用；点击“更多明细”向下展开各模型的请求次数、输入/输出 Token、输入/输出费用及合计。概览提供总消费展开区。可查询任意日期范围（最多 366 天，包含结束日期），也可切换当月或上月。
+上游 API Key 和 OAuth 账户均可独立设置 **每月计费起始日**（1–31 日，默认 1 日）。按统计时区零点开始，短月不足该日期时使用当月最后一天，次月仍按原设置日期计算。上游 Key 在新增/编辑表单设置；OAuth 账户在新增表单或列表“周期费用”下方编辑。列表显示当前周期开始以来的已知费用和起始日期；点击费用展开各模型的请求次数、输入/输出 Token、输入/输出费用及合计。明细默认使用当前周期，仍可独立查询任意日期范围（最多 366 天，包含结束日期），也可切回当前周期或上个自然月。修改周期不会删除历史记录。
+
+OAuth 费用仅统计启用此功能后经本网关发起的 OAuth 测试请求，按已保存的 API 模型单价估算，不代表 ChatGPT 套餐账单，也不包含网关外用量。缺少用量或单价时显示费用未知；OAuth 测试不计入网关推理调用的总费用。概览、私有密钥及其预算继续按原有规则统计。
+
+升级自动执行 `026_billing_cycles.sql`。上游 Key 的创建/编辑、OAuth 开始授权/账户编辑接口接受整数 `billing_cycle_day`；省略时沿用原设置（新建默认 1）。OAuth 费用明细接口为 `GET /admin/api/oauth_accounts/{id}/spending`，与上游费用明细一样支持 `from`、`to` 日期筛选，仅管理员可访问。
 
 私有密钥的费用明细另提供每日 Token 与费用折线图，随日期范围同步更新。点击图例可分别显示或隐藏总 Token、输入 Token、输出 Token 和各币种费用曲线；悬停查看每日精确数值，也可聚焦图表后用方向键切换日期。Token 与费用使用独立纵轴，USD、CNY 等币种分别统计；无请求日期补零，未知费用不作为零费用绘制，并提示未定价请求数。每日统计遵循报表时区。
 

@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func (a *App) testOAuthAccount(ctx context.Context, id, model string) (modelTestResult, error) {
@@ -54,9 +57,55 @@ func (a *App) testOAuthAccount(ctx context.Context, id, model string) (modelTest
 	if json.Unmarshal([]byte(plain), &credentials) != nil || credentials.AccessToken == "" {
 		return result, errors.New("oauth_invalid_response")
 	}
+	started := time.Now()
 	result = a.requestOAuthTest(withOutboundProxy(ctx, proxyID), credentials, model)
 	result.ProxyID, result.ProxyName = proxyID, proxyName
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := a.persistOAuthTest(recordCtx, id, model, started, result); err != nil {
+		slog.Error("OAuth test usage persistence failed")
+	}
 	return result, nil
+}
+
+// OAuth currently supports administrative test requests. Keep these separate
+// from gateway inference totals and never treat API-price estimates as a plan bill.
+func (a *App) persistOAuthTest(ctx context.Context, accountID, model string, started time.Time, result modelTestResult) error {
+	tx, err := a.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	usage := result.Usage
+	usage.Model = model
+	cost, err := estimateRequest(ctx, tx, "openai", model, usage, usage.ServiceTier)
+	if err != nil {
+		return err
+	}
+	snapshot, err := json.Marshal(cost.Snapshot)
+	if err != nil {
+		return err
+	}
+	status := result.HTTPStatus
+	if status == 0 {
+		status = http.StatusBadGateway
+	}
+	accounting := "unknown"
+	if usage.InputKnown || usage.OutputKnown {
+		accounting = "recorded"
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO request_logs
+ (id,oauth_account_id,model,method,endpoint,ip,status,error_code,duration_ms,kind,created_at,
+ input_tokens,output_tokens,cached_tokens,usage_known,cached_tokens_known,usage_accounting,pricing_status,pricing_snapshot,
+ input_cost,output_cost,cached_input_cost,total_cost,cache_write_cost,request_uuid)
+ VALUES($1,$2,$3,'POST','/v1/responses','127.0.0.1',$4,$5,$6,'oauth_test',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::numeric,$17::numeric,$18::numeric,$19::numeric,$20::numeric,$21::uuid)`,
+		newID(), accountID, model, status, result.Error, result.DurationMS, started,
+		usage.Input, usage.Output, usage.Cached, usage.InputKnown && usage.OutputKnown, usage.CachedKnown, accounting, cost.Status, snapshot,
+		cost.Input, cost.Output, cost.Cached, cost.Total, cost.Write, uuid.NewString())
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (a *App) requestOAuthTest(ctx context.Context, credentials oauthCredentials, model string) modelTestResult {

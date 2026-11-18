@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDateTime as date } from "./date-time.mjs";
 import { ModelRequestTest } from "./ModelRequestTest";
+import { BillingCycleField, KeySpendButton } from "./BillingCycleFields";
+import { SpendingDetails } from "./SpendingDetails";
 import { ProxyChoice, type ProxyOption } from "./ProxySelect";
 
 type Props = {
   api: (path: string, options?: RequestInit) => Promise<any>;
   t: (key: string) => string;
   onUnauthorized: () => void;
+  locale: string;
 };
 type Account = {
   id: string;
@@ -24,6 +27,7 @@ type Account = {
   model_count: number;
   proxy_id: string | null;
   proxy_name: string | null;
+  billing_cycle_day: number;
 };
 type Attempt = {
   attempt_id: string;
@@ -33,7 +37,7 @@ type Attempt = {
   redirect_uri: string;
 };
 
-export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
+export function OAuthAccounts({ api, t, locale, onUnauthorized }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
@@ -51,6 +55,8 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
   const [selected, setSelected] = useState<Account | null>(null);
   const [catalog, setCatalog] = useState<any>(null);
   const [testing, setTesting] = useState<Account | null>(null);
+  const [editingBilling, setEditingBilling] = useState<Account | null>(null);
+  const [expandedSpend, setExpandedSpend] = useState<string | null>(null);
   const mounted = useRef(true);
   const modelGeneration = useRef(0);
 
@@ -121,14 +127,19 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
       if (mounted.current) setBusy(false);
     }
   }
-  async function authorize(account?: Account) {
+  async function authorize(account?: Account, billingCycleDay = 1) {
     await perform(async () => {
       const result = await api("oauth_accounts/authorize", {
         method: "POST",
         body: JSON.stringify(
           account
             ? { account_id: account.id }
-            : { name, proxy_id: proxyID, note },
+            : {
+                name,
+                proxy_id: proxyID,
+                note,
+                billing_cycle_day: billingCycleDay,
+              },
         ),
       });
       if (!mounted.current) return;
@@ -175,7 +186,10 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
           className="spending-range"
           onSubmit={(e) => {
             e.preventDefault();
-            void authorize();
+            void authorize(
+              undefined,
+              Number(new FormData(e.currentTarget).get("billing_cycle_day")),
+            );
           }}
         >
           <label>
@@ -197,6 +211,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
               placeholder={t("notePlaceholder")}
             />
           </label>
+          <BillingCycleField t={t} />
           <ProxyChoice
             options={proxies}
             value={proxyID}
@@ -290,6 +305,7 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
                   "note",
                   "status",
                   "proxy_name",
+                  "billingCycleCost",
                   "expires_at",
                   "oauthNextRefresh",
                   "models",
@@ -301,134 +317,184 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
             </thead>
             <tbody>
               {accounts.map((account) => (
-                <tr key={account.id}>
-                  <td>
-                    <div className="resource-name">
-                      <strong>{account.name}</strong>
-                      <small>{account.email || "—"}</small>
-                      <code className="oauth-client-id">
-                        {account.client_id || t("pending")}
-                      </code>
-                    </div>
-                  </td>
-                  <td>
-                    <span className="resource-note" title={account.note || ""}>
-                      {account.note || "—"}
-                    </span>
-                    <button
-                      className="text-button"
-                      disabled={busy}
-                      onClick={() => {
-                        setEditingNote(account);
-                        setNoteDraft(account.note || "");
-                        setError("");
-                      }}
-                    >
-                      {t("edit")}
-                    </button>
-                  </td>
-                  <td>
-                    <span
-                      className={`badge ${account.status === "connected" ? "active" : "pending"}`}
-                    >
-                      <i />
-                      {t(`oauth_${account.status}`)}
-                    </span>
-                    {account.refresh_error && (
-                      <small className="oauth-error">
-                        {t(account.refresh_error)}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    {account.proxy_name || t("proxyDefault")}
-                    <button
-                      className="text-button"
-                      disabled={busy || !!pending}
-                      onClick={() => {
-                        setEditingProxy(account);
-                        setEditProxyID(account.proxy_id || "");
-                        setError("");
-                      }}
-                    >
-                      {t("edit")}
-                    </button>
-                  </td>
-                  <td>{date(account.expires_at)}</td>
-                  <td>
-                    {date(account.next_refresh_at)}
-                    <small className="oauth-last-refresh">
-                      {t("oauthLastRefresh")}: {date(account.last_refreshed_at)}
-                    </small>
-                  </td>
-                  <td>
-                    <button
-                      className="text-button"
-                      disabled={busy}
-                      onClick={() => void showModels(account)}
-                    >
-                      {account.model_count} {t("modelCount")}
-                    </button>
-                    {account.model_sync_error && (
-                      <small className="oauth-error">
-                        {t(account.model_sync_error)}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        disabled={busy || account.status !== "connected"}
-                        onClick={() => setTesting(account)}
+                <Fragment key={account.id}>
+                  <tr>
+                    <td>
+                      <div className="resource-name">
+                        <strong>{account.name}</strong>
+                        <small>{account.email || "—"}</small>
+                        <code className="oauth-client-id">
+                          {account.client_id || t("pending")}
+                        </code>
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className="resource-note"
+                        title={account.note || ""}
                       >
-                        {t("oauthTest")}
-                      </button>
+                        {account.note || "—"}
+                      </span>
                       <button
+                        className="text-button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditingNote(account);
+                          setNoteDraft(account.note || "");
+                          setError("");
+                        }}
+                      >
+                        {t("edit")}
+                      </button>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${account.status === "connected" ? "active" : "pending"}`}
+                      >
+                        <i />
+                        {t(`oauth_${account.status}`)}
+                      </span>
+                      {account.refresh_error && (
+                        <small className="oauth-error">
+                          {t(account.refresh_error)}
+                        </small>
+                      )}
+                    </td>
+                    <td>
+                      {account.proxy_name || t("proxyDefault")}
+                      <button
+                        className="text-button"
                         disabled={busy || !!pending}
-                        onClick={() => void authorize(account)}
+                        onClick={() => {
+                          setEditingProxy(account);
+                          setEditProxyID(account.proxy_id || "");
+                          setError("");
+                        }}
                       >
-                        {t("oauthReauthorize")}
+                        {t("edit")}
                       </button>
-                      <button
-                        disabled={busy || account.status !== "connected"}
+                    </td>
+                    <td>
+                      <KeySpendButton
+                        row={account}
+                        locale={locale}
+                        t={t}
+                        billingCycle
+                        expanded={expandedSpend === account.id}
                         onClick={() =>
-                          void perform(async () => {
-                            await api(
-                              `oauth_accounts/${account.id}/sync_models`,
-                              { method: "POST", body: "{}" },
-                            );
-                            await load();
-                            if (selected?.id === account.id)
-                              await showModels(account);
-                          })
+                          setExpandedSpend(
+                            expandedSpend === account.id ? null : account.id,
+                          )
                         }
+                      />
+                      <button
+                        className="text-button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditingBilling(account);
+                          setError("");
+                        }}
                       >
-                        {t("oauthSyncModels")}
+                        {t("billingCycleDayValue").replace(
+                          "{day}",
+                          String(account.billing_cycle_day),
+                        )}{" "}
+                        · {t("edit")}
                       </button>
+                    </td>
+                    <td>{date(account.expires_at)}</td>
+                    <td>
+                      {date(account.next_refresh_at)}
+                      <small className="oauth-last-refresh">
+                        {t("oauthLastRefresh")}:{" "}
+                        {date(account.last_refreshed_at)}
+                      </small>
+                    </td>
+                    <td>
                       <button
-                        disabled={
-                          busy ||
-                          !account.next_refresh_at ||
-                          Date.parse(account.next_refresh_at) > Date.now()
-                        }
-                        onClick={() =>
-                          void perform(async () => {
-                            try {
+                        className="text-button"
+                        disabled={busy}
+                        onClick={() => void showModels(account)}
+                      >
+                        {account.model_count} {t("modelCount")}
+                      </button>
+                      {account.model_sync_error && (
+                        <small className="oauth-error">
+                          {t(account.model_sync_error)}
+                        </small>
+                      )}
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          disabled={busy || account.status !== "connected"}
+                          onClick={() => setTesting(account)}
+                        >
+                          {t("oauthTest")}
+                        </button>
+                        <button
+                          disabled={busy || !!pending}
+                          onClick={() => void authorize(account)}
+                        >
+                          {t("oauthReauthorize")}
+                        </button>
+                        <button
+                          disabled={busy || account.status !== "connected"}
+                          onClick={() =>
+                            void perform(async () => {
                               await api(
-                                `oauth_accounts/${account.id}/refresh`,
+                                `oauth_accounts/${account.id}/sync_models`,
                                 { method: "POST", body: "{}" },
                               );
-                            } finally {
                               await load();
-                            }
-                          })
-                        }
-                      >
-                        {t("oauthRefreshToken")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                              if (selected?.id === account.id)
+                                await showModels(account);
+                            })
+                          }
+                        >
+                          {t("oauthSyncModels")}
+                        </button>
+                        <button
+                          disabled={
+                            busy ||
+                            !account.next_refresh_at ||
+                            Date.parse(account.next_refresh_at) > Date.now()
+                          }
+                          onClick={() =>
+                            void perform(async () => {
+                              try {
+                                await api(
+                                  `oauth_accounts/${account.id}/refresh`,
+                                  { method: "POST", body: "{}" },
+                                );
+                              } finally {
+                                await load();
+                              }
+                            })
+                          }
+                        >
+                          {t("oauthRefreshToken")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedSpend === account.id && (
+                    <tr className="key-spending-row">
+                      <td colSpan={9}>
+                        <p className="spending-note">{t("oauthSpendHint")}</p>
+                        <SpendingDetails
+                          api={api}
+                          t={t}
+                          locale={locale}
+                          key={`${account.id}-${account.billing_cycle_day}`}
+                          resource="oauth_accounts"
+                          resourceId={account.id}
+                          compact
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -444,7 +510,10 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
           api={api}
           t={t}
           onUnauthorized={onUnauthorized}
-          onClose={() => setTesting(null)}
+          onClose={() => {
+            setTesting(null);
+            void load().catch(fail);
+          }}
         />
       )}
       {editingNote && (
@@ -498,6 +567,67 @@ export function OAuthAccounts({ api, t, onUnauthorized }: Props) {
                   type="button"
                   className="secondary"
                   onClick={() => setEditingNote(null)}
+                >
+                  {t("cancel")}
+                </button>
+                <button className="primary" disabled={busy}>
+                  {t("save")}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+      {editingBilling && (
+        <div className="modal-overlay">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("billingCycleDay")}
+          >
+            <div className="modal-heading">
+              <h2>
+                {editingBilling.name} · {t("billingCycleDay")}
+              </h2>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const day = Number(
+                  new FormData(event.currentTarget).get("billing_cycle_day"),
+                );
+                void perform(async () => {
+                  await api(
+                    `oauth_accounts/${encodeURIComponent(editingBilling.id)}`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ billing_cycle_day: day }),
+                    },
+                  );
+                  if (!mounted.current) return;
+                  setEditingBilling(null);
+                  await load();
+                });
+              }}
+            >
+              <div className="form-fields">
+                {error && (
+                  <p className="error-hint" role="alert">
+                    {t(error)}
+                  </p>
+                )}
+                <BillingCycleField
+                  defaultValue={editingBilling.billing_cycle_day}
+                  t={t}
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setEditingBilling(null)}
                 >
                   {t("cancel")}
                 </button>

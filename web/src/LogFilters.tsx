@@ -98,6 +98,7 @@ export function LogFilters({
               ["", "logAllRecords"],
               ["inference", "inference"],
               ["probe", "probeKind"],
+              ["oauth_test", "oauth_test"],
               ["anomaly", "anomaly"],
             ].map(([kind, label]) => (
               <button
