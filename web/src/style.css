@@ -879,6 +879,11 @@ tbody tr:hover {
   display: flex;
   gap: 14px;
 }
+.gateway-key-table .row-actions {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -916,6 +921,10 @@ tbody tr:hover {
   z-index: 1;
   background: var(--surface);
   border-left: 1px solid var(--border);
+}
+.gateway-key-table .actions-column {
+  width: 1%;
+  padding-inline: 14px;
 }
 th.actions-column,
 tbody tr:hover .actions-column {

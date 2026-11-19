@@ -7,7 +7,6 @@ type Props = {
   allowedModels: string[];
   availableModels: string[];
   initialKey?: string;
-  showKey?: boolean;
   loadKey: (original?: string) => Promise<{ key: string }>;
   rotateKey: () => Promise<{ key: string }>;
   onClose: () => void;
@@ -19,7 +18,6 @@ export function KeyUsageDialog({
   allowedModels,
   availableModels,
   initialKey = "",
-  showKey = false,
   loadKey,
   rotateKey,
   onClose,
@@ -38,7 +36,7 @@ export function KeyUsageDialog({
     );
   });
   const [copyStatus, setCopyStatus] = useState("");
-  const [visible, setVisible] = useState(showKey);
+  const [visible, setVisible] = useState(false);
   const [keyLoading, setKeyLoading] = useState(!initialKey);
   const [keyError, setKeyError] = useState("");
   const [legacy, setLegacy] = useState(false);
@@ -48,7 +46,11 @@ export function KeyUsageDialog({
     allowedModels.includes("*") || allowedModels.includes(model.trim());
   const supported = availableModels.includes(model.trim());
   const options = allowedModels.includes("*") ? availableModels : allowedModels;
-  const curl = buildCurlExample(location.origin, model, key);
+  const commandPreview = buildCurlExample(
+    location.origin,
+    model,
+    visible ? key : "",
+  );
 
   useEffect(() => {
     if (initialKey) return;
@@ -93,7 +95,7 @@ export function KeyUsageDialog({
         <div className="modal-heading">
           <div>
             <span className="eyebrow">{name}</span>
-            <h2 id={`${id}-title`}>{t("howToUse")}</h2>
+            <h2 id={`${id}-title`}>{t("keyAndUsage")}</h2>
           </div>
           <button type="button" aria-label={t("close")} onClick={onClose}>
             <X size={20} />
@@ -231,11 +233,11 @@ export function KeyUsageDialog({
               {t(!permitted ? "usageModelNotAllowed" : "usageModelNotSynced")}
             </p>
           )}
-          {!key.trim() && (
+          {(!visible || !key.trim()) && (
             <p className="usage-env-hint">{t("usageEnvironmentHint")}</p>
           )}
           <pre className="usage-code">
-            <code>{curl}</code>
+            <code>{commandPreview}</code>
           </pre>
           {copyStatus === "error" && (
             <p className="error-hint" role="alert">
@@ -258,7 +260,9 @@ export function KeyUsageDialog({
             disabled={!model.trim()}
             onClick={async () => {
               try {
-                await navigator.clipboard.writeText(curl);
+                await navigator.clipboard.writeText(
+                  buildCurlExample(location.origin, model, key),
+                );
                 setCopyStatus("success");
               } catch {
                 setCopyStatus("error");

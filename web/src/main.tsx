@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Copy,
   Database,
-  Eye,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -712,7 +711,7 @@ function App() {
                       error instanceof Error &&
                       error.message === "key_not_recoverable"
                     )
-                      setUsage({ ...r, initialKey: "" });
+                      setUsage(r);
                     else fail(error);
                   }
                 }}
@@ -1092,7 +1091,13 @@ function App() {
               )}
               <div className="table-scroll" ref={logColumns.containerRef}>
                 <table
-                  className={page === "logs" ? "request-log-table" : undefined}
+                  className={
+                    page === "logs"
+                      ? "request-log-table"
+                      : page === "gateway_keys"
+                        ? "gateway-key-table"
+                        : undefined
+                  }
                   style={page === "logs" && !logColumns.automatic ? { minWidth: `${logColumns.columns.length * 150}px` } : undefined}
                 >
                   <thead>
@@ -1125,6 +1130,7 @@ function App() {
                               <td className="actions-column">
                                 <div className="row-actions">
                                   <button
+                                    type="button"
                                     onClick={() => {
                                       setModal(r);
                                       setError("");
@@ -1136,36 +1142,10 @@ function App() {
                                     <>
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setUsage({
-                                            ...r,
-                                            initialKey: "",
-                                            showKey: true,
-                                          })
-                                        }
+                                        onClick={() => setUsage(r)}
                                       >
-                                        <Eye size={14} />
-                                        {t("revealKey")}
+                                        {t("keyAndUsage")}
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setUsage({ ...r, initialKey: "" })
-                                        }
-                                      >
-                                        {t("howToUse")}
-                                      </button>
-                                      {isAdmin && settings.storage && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setModal(r);
-                                            setError("");
-                                          }}
-                                        >
-                                          {t("configureStorage")}
-                                        </button>
-                                      )}
                                       <button
                                         type="button"
                                         className="danger-link"
@@ -1204,15 +1184,15 @@ function App() {
                                           {t("reset_auth")}
                                         </button>
                                       )}
+                                      {r.quota_blocked && (
+                                        <button
+                                          disabled={busy}
+                                          onClick={() => action(r.id, "probe")}
+                                        >
+                                          {t("probe")}
+                                        </button>
+                                      )}
                                     </>
-                                  )}
-                                  {r.quota_blocked && (
-                                    <button
-                                      disabled={busy}
-                                      onClick={() => action(r.id, "probe")}
-                                    >
-                                      {t("probe")}
-                                    </button>
                                   )}
                                 </div>
                                 {r.model_sync_error && (
@@ -1596,7 +1576,6 @@ function App() {
           allowedModels={usage.models || ["*"]}
           availableModels={models.map((row) => row.model)}
           initialKey={usage.initialKey}
-          showKey={usage.showKey}
           loadKey={(original) =>
             api(`gateway_keys/${usage.id}/reveal`, {
               method: "POST",

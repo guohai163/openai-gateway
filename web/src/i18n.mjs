@@ -232,7 +232,6 @@ export const messages = {
       "Optional. Save selected request bodies to the configured S3 bucket; disabled by default.",
     storeInputJSON: "Store input JSON",
     storeOutputJSON: "Store output JSON / SSE",
-    configureStorage: "JSON storage",
     testStorage: "Test write & read",
     storageTestPassed: "Small test object written and read successfully. Actual archives can still fail due to capacity or path permissions.",
     storage_not_configured: "Configure S3 in the deployment environment first.",
@@ -632,6 +631,7 @@ export const messages = {
     copy: "Copy key",
     copied: "Copied",
     howToUse: "How to use",
+    keyAndUsage: "Key & usage",
     delete: "Delete",
     deletePrivateKey: "Delete private key",
     confirmDeleteKey: "Delete key",
@@ -645,7 +645,7 @@ export const messages = {
     usageKeyHint:
       "The saved key is filled in automatically. Reveal or copy it here; closing the dialog clears it from this view.",
     usageEnvironmentHint:
-      "You can also leave the key empty and set GATEWAY_API_KEY in your terminal before running the example.",
+      "To run the example with an environment variable, set GATEWAY_API_KEY in your terminal first.",
     usageModelNotAllowed:
       "This key does not allow this model. Choose an authorized model or update the key’s permissions.",
     usageModelNotSynced:
@@ -959,7 +959,6 @@ export const messages = {
       "可选。将勾选的请求正文保存至已配置 S3 存储桶，默认关闭。",
     storeInputJSON: "存储输入 JSON",
     storeOutputJSON: "存储输出 JSON / SSE",
-    configureStorage: "JSON 存储配置",
     testStorage: "测试写入与读取",
     storageTestPassed: "小型测试对象写入和读取成功。实际归档仍可能因容量或路径权限不足而失败。",
     storage_not_configured: "请先通过部署环境配置 S3。",
@@ -1347,6 +1346,7 @@ export const messages = {
     copy: "复制密钥",
     copied: "已复制",
     howToUse: "如何使用",
+    keyAndUsage: "密钥与用法",
     delete: "删除",
     deletePrivateKey: "删除私有密钥",
     confirmDeleteKey: "删除密钥",
@@ -1360,7 +1360,7 @@ export const messages = {
     usageKeyHint:
       "已自动填写保存的密钥，可点击查看或复制，关闭弹层即清除本次展示。",
     usageEnvironmentHint:
-      "也可留空，先在终端设置 GATEWAY_API_KEY 环境变量后再运行示例。",
+      "如需使用环境变量运行示例，请先在终端设置 GATEWAY_API_KEY。",
     usageModelNotAllowed:
       "此密钥未授权该模型，请选择已授权模型，或先修改密钥权限。",
     usageModelNotSynced:
