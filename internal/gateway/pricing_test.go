@@ -78,6 +78,80 @@ func TestParseStandardPricing(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOpenAICurrentPricingFormat(t *testing.T) {
+	const source = `# Pricing
+Flagship models
+Standard
+### Standard pricing data
+| Model | Short context input | Short context output | Short context cached input | Short context 30m write | Short context 12h write | Long context input | Long context output | Long context cached input | Long context 30m write | Long context 12h write |
+| gpt-6.2-sol | $2.00 | $10.00 | $0.10 | $2.50 | $5.00 | $4.00 | $15.00 | $0.20 | $5.00 | $10.00 |
+### Ultrafast promotion pricing data
+| Model | Input | Output |
+| gpt-6.2-sol | $6.00 | $30.00 |
+Short context: ≤272K input tokens. Long context: >272K input tokens.
+
+Multimodal models
+Images
+Standard
+### Grouped Pricing Table data
+| Model | Modality | Input | Output | Cached input |
+| gpt-image-test | Image | $8.00 | $30.00 | $2.00 |
+| gpt-image-test | Text | $5.00 | - | $1.25 |
+
+Audio
+Realtime & Audio
+### Grouped Pricing Table data
+| Model | Modality | Input | Output | Cached input |
+| gpt-audio-test | Text | $0.60 | $2.40 | - |
+
+Specialized models
+Standard
+### Grouped Pricing Table data
+| Category | Model | Input | Output | Cached input | 30m write | 12h write |
+| Healthcare model configurations | gpt-6.2-sol-healthcare (long context) | $4.00 | $15.00 | $0.20 | $5.00 | $10.00 |
+| Healthcare model configurations | gpt-6.2-sol-healthcare (short context) | $2.00 | $10.00 | $0.10 | $2.50 | $5.00 |
+| Healthcare model configurations | model-limited (short context) | $5.00 | $25.00 | $0.50 | - | - |
+| Healthcare model configurations | model-limited (long context) | - | - | - | - | - |
+Fast
+### Grouped Pricing Table data
+| Category | Model | Input | Output | Cached input |
+| Healthcare model configurations | gpt-6.2-sol-healthcare (short context) | $4.00 | $20.00 | $0.20 |
+| Healthcare model configurations | gpt-6.2-sol-healthcare (long context) | $8.00 | $30.00 | $0.40 |
+`
+	prices, err := parseOpenAIPricing(source)
+	if err != nil || len(prices) != 4 {
+		t.Fatalf("expected four Standard prices, got %d: %v", len(prices), err)
+	}
+	byModel := make(map[string]modelPrice, len(prices))
+	for _, price := range prices {
+		byModel[price.Model] = price
+	}
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-sol-healthcare"} {
+		p := byModel[model]
+		if p.LongPolicy != "tiered" || p.Threshold == nil || *p.Threshold != 272000 {
+			t.Fatalf("%s: expected a 272,000-token threshold, got %+v", model, p)
+		}
+		rates := []*string{p.Input, p.Output, p.Cached, p.Write30m, p.Write12h, p.LongInput, p.LongOutput, p.LongCached, p.LongWrite30m, p.LongWrite12h}
+		want := []string{"2.00", "10.00", "0.10", "2.50", "5.00", "4.00", "15.00", "0.20", "5.00", "10.00"}
+		for i, rate := range rates {
+			if rate == nil || *rate != want[i] {
+				t.Fatalf("%s: expected %s in rate column %d", model, want[i], i+1)
+			}
+		}
+	}
+	if p := byModel["model-limited"]; p.LongPolicy != "unknown" || p.LongInput != nil {
+		t.Fatalf("expected unavailable long-context pricing, got %+v", p)
+	}
+	if p := byModel["gpt-image-test"]; len(p.ModalityPrices) != 2 {
+		t.Fatalf("expected both image-model modalities, got %+v", p)
+	}
+	conflict := strings.Replace(source, "\nFast\n", "\n| Healthcare model configurations | gpt-6.2-sol-healthcare (long context) | $9.00 | $15.00 | $0.20 | $5.00 | $10.00 |\nFast\n", 1)
+	if _, err := parseOpenAIPricing(conflict); err == nil || err.Error() != "pricing_conflict" {
+		t.Fatalf("expected conflicting long-context rows to fail, got %v", err)
+	}
+}
+
 func TestPricingParserRejectsChangedOrConflictingSource(t *testing.T) {
 	for _, source := range []string{"<html>Access denied</html>", "# Pricing\n| Model | New price |\n| model | $1 |", priceFixture + "\nStandard\n| Model | Input | Output | Cached input |\n| --- | --- | --- | --- |\n| model-flat | $999 | $999 | - |"} {
 		if _, e := parseOpenAIPricing(source); e == nil {

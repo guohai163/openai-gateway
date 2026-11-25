@@ -90,6 +90,18 @@ func markdownCells(line string) []string {
 	return out
 }
 
+func addOpenAIPrice(prices map[string]modelPrice, p modelPrice) error {
+	if old, exists := prices[p.Model]; exists {
+		a, _ := json.Marshal(old)
+		b, _ := json.Marshal(p)
+		if string(a) != string(b) {
+			return errors.New("pricing_conflict")
+		}
+	}
+	prices[p.Model] = p
+	return nil
+}
+
 // Explicit Standard text/embedding and image-generation token tables are accepted.
 // Image rates remain separate from text; other tiers and billing units are skipped.
 func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
@@ -109,20 +121,24 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 	previousImageModel := ""
 	var header []string
 	prices := map[string]modelPrice{}
+	shortContextPrices := map[string]modelPrice{}
+	longContextPrices := map[string]modelPrice{}
 	recognized := false
 	for _, line := range strings.Split(markdown, "\n") {
 		label := strings.TrimSpace(line)
 		switch strings.ToLower(strings.TrimSpace(strings.TrimLeft(label, "#"))) {
-		case "image generation models":
+		case "images", "image generation models":
 			imageGeneration = true
-		case "flagship models", "cyber models", "gpt-live sessions", "realtime and audio generation models", "transcription models", "tools", "fine-tuning":
+		case "flagship models", "multimodal models", "audio", "gpt-live", "realtime & audio", "transcription", "specialized models",
+			"cyber models", "gpt-live sessions", "realtime and audio generation models", "transcription models", "tools", "fine-tuning":
 			imageGeneration = false
 		}
 		switch strings.ToLower(label) {
 		case "standard", "### standard pricing data":
 			standard = true
 			header = nil
-		case "batch", "flex", "fast", "ultrafast", "finetuning", "### batch pricing data", "### fast pricing data", "### ultrafast pricing data":
+		case "batch", "flex", "fast", "ultrafast", "finetuning", "### batch pricing data", "### flex pricing data", "### fast pricing data",
+			"### ultrafast pricing data", "### ultrafast promotion pricing data", "### ultrafast list pricing data":
 			standard = false
 			header = nil
 		}
@@ -210,19 +226,32 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 			continue
 		}
 		recognized = true
-		name := strings.Trim(columns["Model"], "`")
-		name = strings.TrimSpace(strings.SplitN(name, " (", 2)[0])
+		model := columns["Model"]
+		name := strings.Trim(strings.SplitN(model, " (", 2)[0], "` ")
 		if !modelIdentifier.MatchString(name) {
 			continue
 		}
+		target := prices
+		longRow := false
+		if flat {
+			switch label := strings.ToLower(strings.Trim(model, "` ")); {
+			case strings.HasSuffix(label, " (short context)"):
+				target = shortContextPrices
+			case strings.HasSuffix(label, " (long context)"):
+				target = longContextPrices
+				longRow = true
+			}
+		}
 		p := modelPrice{Model: name, Currency: "USD", PriceUnit: "per_1m_tokens", OutputApplicable: true, LongPolicy: "none"}
 		output, cached := columns["Output"], columns["Cached input"]
+		writePrefix := ""
 		if !flat {
 			output, cached = columns["Short context output"], columns["Short context cached input"]
+			writePrefix = "Short context "
 		}
 		var ok bool
 		p.Input, ok = parsePrice(input)
-		if !ok || p.Input == nil {
+		if !ok || (p.Input == nil && !longRow) {
 			continue
 		}
 		p.Output, ok = parsePrice(output)
@@ -235,7 +264,7 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 				continue
 			}
 		}
-		if p.Output == nil {
+		if p.Output == nil && !longRow {
 			if columns["Category"] == "Embedding" || columns["Category"] == "Moderation" || strings.HasPrefix(name, "text-embedding-") {
 				p.OutputApplicable = false
 			} else {
@@ -272,7 +301,7 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 			name   string
 			target **string
 		}{
-			{"Short context 30m write", &p.Write30m}, {"Short context 12h write", &p.Write12h},
+			{writePrefix + "30m write", &p.Write30m}, {writePrefix + "12h write", &p.Write12h},
 			{"Long context 30m write", &p.LongWrite30m}, {"Long context 12h write", &p.LongWrite12h},
 		}
 		for _, column := range writeColumns {
@@ -284,14 +313,22 @@ func parseOpenAIPricing(markdown string) ([]modelPrice, error) {
 				*column.target = price
 			}
 		}
-		if old, exists := prices[name]; exists {
-			a, _ := json.Marshal(old)
-			b, _ := json.Marshal(p)
-			if string(a) != string(b) {
-				return nil, errors.New("pricing_conflict")
-			}
+		if err := addOpenAIPrice(target, p); err != nil {
+			return nil, err
 		}
-		prices[name] = p
+	}
+	for name, p := range shortContextPrices {
+		long := longContextPrices[name]
+		p.LongPolicy = "unknown"
+		p.Threshold = globalThreshold
+		p.LongInput, p.LongOutput, p.LongCached = long.Input, long.Output, long.Cached
+		p.LongWrite30m, p.LongWrite12h = long.Write30m, long.Write12h
+		if p.Threshold != nil && p.LongInput != nil && p.LongOutput != nil {
+			p.LongPolicy = "tiered"
+		}
+		if err := addOpenAIPrice(prices, p); err != nil {
+			return nil, err
+		}
 	}
 	if !recognized || len(prices) == 0 {
 		return nil, errors.New("pricing_format_changed")

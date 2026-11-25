@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.28.2 - 2026-11-26
+
+### Fixed
+
+- 修复 OpenAI 价格同步将同一模型的长、短上下文报价误判为冲突的问题。同步可导入 `gpt-6.2-sol` 和 `gpt-6.2-sol-healthcare` 的 Standard 单价，包括 30 分钟和 12 小时缓存写入价。
+- 兼容官方价格文档的 `Images` 分区，保留图像模型的文本和图像 Token 单价。
+
+### Upgrade
+
+- 更新到 `ghcr.io/guohai163/openai-gateway:1.28.2` 后，在「模型定价」页面选择 OpenAI，再点击「同步官方价格」。
+
 ## v1.28.1 - 2026-11-19
 
 ### Changed
