@@ -758,7 +758,7 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 }
 
 const pricingRows = `SELECT p.platform,p.model,p.currency,p.price_unit,p.service_tier,p.output_applicable,p.long_context_policy,p.long_context_threshold,p.long_context_surcharge,p.source_url,p.source_current,p.synced_at,p.created_at,p.modality_prices,p.source_prices,p.input_price::text AS input_price,p.output_price::text AS output_price,p.cached_input_price::text AS cached_input_price,p.long_input_price::text AS long_input_price,p.long_output_price::text AS long_output_price,p.long_cached_input_price::text AS long_cached_input_price,p.cache_write_30m_price::text AS cache_write_30m_price,p.cache_write_12h_price::text AS cache_write_12h_price,p.long_cache_write_30m_price::text AS long_cache_write_30m_price,p.long_cache_write_12h_price::text AS long_cache_write_12h_price,
- EXISTS(SELECT 1 FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.platform=p.platform AND m.model=p.model) AS in_catalog,
+ EXISTS(SELECT 1 FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.platform=p.platform AND CASE WHEN k.platform='gemini' THEN regexp_replace(m.model, '^models/', '') ELSE m.model END=p.model) AS in_catalog,
  CASE WHEN p.input_price IS NULL OR (p.output_applicable AND p.output_price IS NULL) OR (p.modality_prices<>'{}'::jsonb AND (p.modality_prices->'image'->>'input_price' IS NULL OR p.modality_prices->'image'->>'output_price' IS NULL OR p.modality_prices->'text'->>'input_price' IS NULL)) THEN 'missing' WHEN NOT p.source_current THEN 'stale' WHEN p.long_context_policy='unknown' THEN 'partial' ELSE 'ready' END AS price_status FROM model_pricing p`
 
 func (a *App) pricingAdmin(w http.ResponseWriter, r *http.Request, parts []string) {

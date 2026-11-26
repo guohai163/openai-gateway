@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 )
@@ -19,7 +18,7 @@ const maxBody = 32 << 20
 
 func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	k := r.Context().Value(keyContext).(GatewayKey)
-	if r.URL.Path == "/v1/models" && r.Method == "GET" {
+	if (r.URL.Path == "/v1/models" || r.URL.Path == "/v1beta/models") && r.Method == "GET" {
 		a.listModels(w, r, k)
 		return
 	}
@@ -30,7 +29,22 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	var body []byte
 	var imageBody *imageRequest
 	isResponse := false
-	if r.Method == "POST" && isImagePath(path) {
+	geminiModel, geminiAction, nativeGemini := geminiModelAction(path)
+	protocol := "openai"
+	if r.Method == "POST" && nativeGemini {
+		protocol = "gemini"
+		model = geminiModel
+		var err error
+		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+		if err != nil {
+			writeError(w, 413, "request_too_large")
+			return
+		}
+		if !json.Valid(body) {
+			writeError(w, 400, "invalid_json")
+			return
+		}
+	} else if r.Method == "POST" && isImagePath(path) {
 		var status int
 		var code string
 		imageBody, status, code = readImageRequest(w, r)
@@ -100,7 +114,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found")
 		return
 	}
-	if !allowedModel(k, model) || (k.PricedOnly && !a.pricedModel(r.Context(), model)) {
+	if !(allowedModel(k, model) || (nativeGemini && allowedModel(k, "models/"+model))) || (k.PricedOnly && !nativeGemini && !a.pricedModel(r.Context(), model)) {
 		writeError(w, 403, "model_not_allowed")
 		return
 	}
@@ -108,7 +122,7 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "service_tier_not_allowed")
 		return
 	}
-	if r.Method == "POST" {
+	if r.Method == "POST" && !nativeGemini {
 		var cacheErr error
 		body, k.EffectiveCacheTTL, k.CachePolicyResult, cacheErr = applyPromptCache(body, path, model, k)
 		if cacheErr != nil {
@@ -130,15 +144,10 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			k.CacheWriteLifetime.Source = "gateway_policy"
 		}
 	}
-	candidates, err := a.keyCandidates(r.Context(), model, pin, k)
+	candidates, err := a.keyCandidates(r.Context(), model, pin, k, protocol)
 	if err != nil {
 		writeError(w, 503, "database_unavailable")
 		return
-	}
-	switch path {
-	case "/v1/chat/completions", "/v1/embeddings", "/v1/images/generations":
-	default:
-		candidates = slices.DeleteFunc(candidates, func(u Upstream) bool { return u.Platform == "gemini" })
 	}
 	if len(candidates) == 0 {
 		writeError(w, 503, "no_available_upstream")
@@ -172,13 +181,21 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		attempt := index + 1
 		u.ServiceTier = serviceTier
 		upstreamPath := path
-		if r.URL.RawQuery != "" {
+		if r.URL.RawQuery != "" || geminiAction == "streamGenerateContent" {
 			q, e := url.ParseQuery(r.URL.RawQuery)
 			if e != nil {
 				writeError(w, 400, "invalid_query")
 				return
 			}
-			upstreamPath += "?" + q.Encode()
+			if nativeGemini {
+				q = url.Values{}
+				if geminiAction == "streamGenerateContent" {
+					q.Set("alt", "sse")
+				}
+			}
+			if encoded := q.Encode(); encoded != "" {
+				upstreamPath += "?" + encoded
+			}
 		}
 		req, e := a.makeRequest(r.Context(), u, r.Method, upstreamPath, body)
 		if e != nil {
@@ -191,7 +208,11 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 			req.GetBody = nil
 			req.Header.Set("Content-Type", imageBody.contentType)
 		}
-		resp, e := a.doOutbound(req)
+		client := a.outboundHTTPClient(req.Context())
+		if nativeGemini {
+			client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		}
+		resp, e := client.Do(req)
 		if e != nil {
 			a.logAttempt(k, u, r, 502, "upstream_connection_error", start, Usage{}, responseID, attempt)
 			writeError(w, 502, "upstream_connection_error")
@@ -241,6 +262,9 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		var v map[string]any
 		_ = json.Unmarshal(b, &v)
 		usage := usageForPath(v, path)
+		if nativeGemini {
+			usage = geminiUsage(v)
+		}
 		if isResponse {
 			if id, ok := v["id"].(string); ok && id != "" {
 				responseID = id
@@ -280,7 +304,8 @@ func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
 	if ids == nil {
 		ids = []string{}
 	}
-	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND (cardinality($2::text[])=0 OR k.id=ANY($2::text[])) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=m.model AND p.platform=k.platform)) ORDER BY m.model`, k.PricedOnly, ids)
+	gemini := r.URL.Path == "/v1beta/models"
+	rows, e := a.DB.Query(r.Context(), `SELECT DISTINCT m.model,m.data FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE `+available+` AND (k.platform='gemini')=$3 AND (cardinality($2::text[])=0 OR k.id=ANY($2::text[])) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',m.model) AND c.scope='key' AND c.scope_id=k.id) AND ($1::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.model=CASE WHEN $3 THEN regexp_replace(m.model, '^models/', '') ELSE m.model END AND p.platform=k.platform)) ORDER BY m.model`, k.PricedOnly, ids, gemini)
 	if e != nil {
 		writeError(w, 503, "database_unavailable")
 		return
@@ -295,6 +320,15 @@ func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
 			writeError(w, 503, "database_unavailable")
 			return
 		}
+		if gemini {
+			model := strings.TrimPrefix(id, "models/")
+			if !seen[model] && (allowedModel(k, id) || allowedModel(k, model) || allowedModel(k, "models/"+model)) {
+				entry, _ := json.Marshal(map[string]any{"name": "models/" + model})
+				data = append(data, entry)
+				seen[model] = true
+			}
+			continue
+		}
 		if !seen[id] && allowedModel(k, id) {
 			if k.PricedOnly {
 				safe, _ := json.Marshal(map[string]any{"id": id, "object": "model", "created": 0, "owned_by": "gateway"})
@@ -307,6 +341,10 @@ func (a *App) listModels(w http.ResponseWriter, r *http.Request, k GatewayKey) {
 	}
 	if rows.Err() != nil {
 		writeError(w, 503, "database_unavailable")
+		return
+	}
+	if gemini {
+		writeJSON(w, 200, map[string]any{"models": data})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
@@ -359,6 +397,8 @@ func (a *App) stream(w http.ResponseWriter, r *http.Request, k GatewayKey, u Ups
 				}
 				if v["usage"] != nil {
 					usage = usageForPath(v, r.URL.Path)
+				} else if u.Platform == "gemini" && v["usageMetadata"] != nil {
+					usage = geminiUsage(v)
 				}
 				if er, ok := v["error"].(map[string]any); ok {
 					code, _ = er["code"].(string)

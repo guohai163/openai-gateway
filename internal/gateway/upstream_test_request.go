@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,7 +58,8 @@ func (a *App) runUpstreamTest(ctx context.Context, id, model string) (modelTestR
 	}
 	u.Model = model
 	path := "/v1/responses"
-	chat := u.Platform == "bailian" || u.Platform == "gemini"
+	chat := u.Platform == "bailian"
+	gemini := u.Platform == "gemini"
 	body := map[string]any{
 		"model": model, "input": []any{map[string]string{"role": "user", "content": modelTestPrompt}},
 		"store": false, "stream": true,
@@ -69,13 +71,28 @@ func (a *App) runUpstreamTest(ctx context.Context, id, model string) (modelTestR
 			"stream": true,
 		}
 	}
+	if gemini {
+		id := strings.TrimPrefix(model, "models/")
+		if !modelIdentifier.MatchString(id) || strings.ContainsAny(id, "/:") {
+			return result, errors.New("upstream_test_model_not_supported")
+		}
+		path = "/v1beta/models/" + url.PathEscape(id) + ":generateContent"
+		body = map[string]any{"contents": []any{
+			map[string]any{"parts": []map[string]string{{"text": modelTestPrompt}}},
+		}}
+	}
 	raw, _ := json.Marshal(body)
 	req, err := a.makeRequest(ctx, u, http.MethodPost, path, raw)
 	if err != nil {
 		return result, err
 	}
-	req.Header.Set("Accept", "text/event-stream")
 	secret := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	if gemini {
+		secret = req.Header.Get("X-Goog-Api-Key")
+		req.Header.Set("Accept", "application/json")
+	} else {
+		req.Header.Set("Accept", "text/event-stream")
+	}
 	result = a.requestModelTest(req, model, []string{secret}, chat)
 	result.ProxyID, result.ProxyName = u.ProxyID, proxyName
 	return result, nil
@@ -116,4 +133,38 @@ func readChatTestResponse(body io.Reader, result *modelTestResult) string {
 	default:
 		return "model_test_invalid_response"
 	}
+}
+
+func readGeminiTestResponse(body io.Reader, result *modelTestResult) string {
+	var response struct {
+		ResponseID string
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text    string
+					Thought bool
+				}
+			}
+		}
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, (4<<20)+1))
+	if err != nil || len(raw) > 4<<20 || json.Unmarshal(raw, &response) != nil {
+		return "model_test_invalid_response"
+	}
+	if result.RequestID == "" {
+		result.RequestID = response.ResponseID
+	}
+	var output strings.Builder
+	if len(response.Candidates) > 0 {
+		for _, part := range response.Candidates[0].Content.Parts {
+			if !part.Thought {
+				output.WriteString(part.Text)
+			}
+		}
+	}
+	result.Output = output.String()
+	if strings.TrimSpace(result.Output) == "" {
+		return "model_test_incomplete"
+	}
+	return ""
 }

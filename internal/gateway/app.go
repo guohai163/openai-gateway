@@ -134,6 +134,7 @@ func (a *App) Handler(ui fs.FS) http.Handler {
 	mux.HandleFunc("POST /admin/api/login", a.login)
 	mux.HandleFunc("POST /admin/api/mfa", a.completeMFA)
 	mux.Handle("/admin/api/", a.adminAuth(http.HandlerFunc(a.admin)))
+	mux.Handle("/v1beta/", a.gatewayAuth(http.HandlerFunc(a.proxy)))
 	mux.Handle("/v1/", a.gatewayAuth(http.HandlerFunc(a.proxy)))
 	if ui != nil {
 		mux.Handle("/", http.FileServerFS(ui))

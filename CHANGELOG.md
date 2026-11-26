@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.30.0 - 2026-11-26
+
+- Gemini 密钥测试改用 Google 原生 generateContent 接口，支持带 models/ 前缀的目录模型 ID。
+- Gemini 客户端改用 `/v1beta` 和网关私有 Key，支持模型列表、普通生成和 SSE 流式生成。`/v1` 服务 OpenAI 和百炼。
+- 管理后台新增 Gemini 渠道图标。
+
 ## v1.29.1 - 2026-11-26
 
 ### Fixed

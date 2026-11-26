@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.29.1](https://github.com/guohai163/openai-gateway/releases/tag/v1.29.1) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.29.1`。
+最新版本：[v1.30.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.30.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.30.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -34,15 +34,24 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 
 ## Google Gemini 上游
 
-在管理后台的「上游密钥」中新建密钥，渠道选择 **Google Gemini**，粘贴在 [Google AI Studio](https://aistudio.google.com/api-keys) 创建的 API Key。保存后网关会同步模型目录。客户端使用网关私有 Key 和同步列表中的模型 ID，可调用 Chat Completions（含流式响应）、Embeddings 和图片生成，具体能力取决于所选模型。
+在管理后台的「上游密钥」中新建密钥，渠道选择 **Google Gemini**，粘贴在 [Google AI Studio](https://aistudio.google.com/api-keys) 创建的 API Key。保存后网关会同步模型目录。客户端使用网关私有 Key 和同步列表中的模型 ID，可通过原生接口调用文本生成及流式生成，具体能力取决于所选模型。
 
-Gemini 接入使用 [Google 的 OpenAI 兼容 API](https://ai.google.dev/gemini-api/docs/openai)。手动测试和恢复探测需选择支持文本对话的模型。在「模型定价」选择 Google Gemini 并点击「同步官方价格」，网关会拉取标准付费 Token 单价。同步采用当日生效的官方报价，官方价格切换后可重新同步。无法匹配的模型费用显示为未知。
+Gemini 下游使用原生协议。OpenAI 和百炼使用 `/v1`，Gemini 使用 `/v1beta`。两个入口各自提供模型目录并使用独立的上游渠道池。
+
+```bash
+curl 'https://你的域名/v1beta/models/你的Gemini模型ID:generateContent' \
+  -H "X-Goog-Api-Key: $GATEWAY_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"contents":[{"parts":[{"text":"Hello"}]}]}'
+```
+
+Gemini 模型目录使用 `GET /v1beta/models`。流式请求使用 `:streamGenerateContent?alt=sse`。手动测试和恢复探测需选择支持文本对话的模型。在「模型定价」选择 Google Gemini 并点击「同步官方价格」，网关会拉取标准付费 Token 单价。同步采用当日生效的官方报价，官方价格切换后可重新同步。无法匹配的模型费用显示为未知。
 
 ## 上游密钥请求测试
 
 **上游密钥 / Upstream keys** 列表的 **操作 / Actions** 中提供 **测试** 按钮。选择此密钥已同步列表中支持文本对话的模型，点击 **发送测试请求**，服务端会固定使用该密钥发送 `Hello word!`，展示模型响应、耗时、远程 HTTP 状态、请求 ID 及脱敏后的错误详情。没有模型时先刷新该密钥的模型列表。
 
-管理员接口 `POST /admin/api/upstream_keys/{id}/test` 接受 `{"model":"模型 ID"}`，要求管理员会话及 CSRF。OpenAI 渠道请求 `/v1/responses`，百炼请求其 OpenAI 兼容 Chat Completions 接口，均以流式方式读取完成结果；后台校验模型确实属于所选密钥，不切换其他上游或重试失败请求。手动测试可用于诊断已停用或被阻断的密钥，不修改其启停、认证错误和额度恢复状态。
+管理员接口 `POST /admin/api/upstream_keys/{id}/test` 接受 `{"model":"模型 ID"}`，要求管理员会话及 CSRF。OpenAI 渠道请求 `/v1/responses`，百炼请求其 OpenAI 兼容 Chat Completions 接口，均以流式方式读取完成结果。Gemini 测试使用 Google 原生 generateContent 接口。后台校验模型确实属于所选密钥，不切换其他上游或重试失败请求。手动测试可用于诊断已停用或被阻断的密钥，不修改其启停、认证错误和额度恢复状态。
 
 测试会产生所选上游的实际用量；密钥只在服务端解密，不回传浏览器，审计仅保存测试操作和密钥 ID。文本测试不适用于仅支持图片、音频或 Embeddings 的模型。
 

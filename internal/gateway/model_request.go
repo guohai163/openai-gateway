@@ -54,6 +54,7 @@ func (a *App) requestModelTest(req *http.Request, model string, secrets []string
 	}()
 	client := a.oauthHTTPClient(req.Context())
 	client.Timeout = 60 * time.Second
+	gemini := req.Header.Get("X-Goog-Api-Key") != ""
 	resp, err := client.Do(req)
 	if err != nil {
 		result.Error = "model_test_connection_failed"
@@ -68,11 +69,20 @@ func (a *App) requestModelTest(req *http.Request, model string, secrets []string
 	if resp.StatusCode != http.StatusOK {
 		result.Error = "model_test_failed"
 		var failure struct {
-			Error  modelTestError `json:"error"`
-			Detail string         `json:"detail"`
+			Error struct {
+				Code    json.RawMessage
+				Status  string
+				Param   string
+				Message string
+			} `json:"error"`
+			Detail string `json:"detail"`
 		}
 		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&failure) == nil {
-			result.ErrorCode, result.ErrorParam = failure.Error.Code, failure.Error.Param
+			result.ErrorParam = failure.Error.Param
+			_ = json.Unmarshal(failure.Error.Code, &result.ErrorCode)
+			if result.ErrorCode == "" && gemini {
+				result.ErrorCode = failure.Error.Status
+			}
 			result.Detail = failure.Error.Message
 			if result.Detail == "" {
 				result.Detail = failure.Detail
@@ -80,7 +90,9 @@ func (a *App) requestModelTest(req *http.Request, model string, secrets []string
 		}
 		return
 	}
-	if chat && !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+	if gemini {
+		result.Error = readGeminiTestResponse(resp.Body, &result)
+	} else if chat && !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 		result.Error = readChatTestResponse(resp.Body, &result)
 	} else {
 		result.Error = readModelTestStream(resp.Body, &result, chat)

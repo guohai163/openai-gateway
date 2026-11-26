@@ -39,7 +39,7 @@ func (a *App) upstreamBaseURL(platform string) string {
 }
 
 func upstreamRequestPath(platform, path string) string {
-	if platform == "gemini" {
+	if platform == "gemini" && strings.HasPrefix(path, "/v1/") {
 		return "/v1beta/openai/" + strings.TrimPrefix(path, "/v1/")
 	}
 	if platform != "bailian" {
@@ -76,12 +76,16 @@ func primaryPoolOrder(ids []string, started, now time.Time) []string {
 	return append(ordered, ids[:index]...)
 }
 
-func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayKey) ([]Upstream, error) {
+func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayKey, protocols ...string) ([]Upstream, error) {
+	protocol := ""
+	if len(protocols) > 0 {
+		protocol = protocols[0]
+	}
 	ids := key.UpstreamKeyIDs
 	if ids == nil {
 		ids = []string{}
 	}
-	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND (cardinality($3::text[])=0 OR k.id=ANY($3::text[])) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND m.model=$1) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1) AND c.scope='key' AND c.scope_id=k.id) AND ($4::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.platform=k.platform AND p.model=$1)) ORDER BY k.id`, model, pin, ids, key.PricedOnly)
+	rows, e := a.DB.Query(ctx, selectUpstream+`WHERE `+available+` AND ($2='' OR k.id=$2) AND (cardinality($3::text[])=0 OR k.id=ANY($3::text[])) AND ($5='' OR (k.platform='gemini')=($5='gemini')) AND EXISTS(SELECT 1 FROM models m WHERE m.upstream_key_id=k.id AND (m.model=$1 OR ($5='gemini' AND m.model='models/'||$1))) AND NOT EXISTS(SELECT 1 FROM cooldowns c WHERE c.until_at>now() AND c.model IN ('*',$1,CASE WHEN $5='gemini' THEN 'models/'||$1 ELSE $1 END) AND c.scope='key' AND c.scope_id=k.id) AND ($4::boolean=false OR EXISTS(SELECT 1 FROM (`+pricedModels+`) p WHERE p.platform=k.platform AND p.model=$1)) ORDER BY k.id`, model, pin, ids, key.PricedOnly, protocol)
 	if e != nil {
 		return nil, e
 	}
@@ -110,7 +114,7 @@ func (a *App) keyCandidates(ctx context.Context, model, pin string, key GatewayK
 			}
 		}
 	} else if len(out) > 1 && pin == "" {
-		counter := key.ID + ":" + model
+		counter := key.ID + ":" + protocol + ":" + model
 		a.mu.Lock()
 		n := a.rr[counter]
 		a.rr[counter] = n + 1
@@ -133,7 +137,11 @@ func (a *App) makeRequest(ctx context.Context, u Upstream, method, path string, 
 	if e != nil {
 		return nil, e
 	}
-	req.Header.Set("Authorization", "Bearer "+secret)
+	if u.Platform == "gemini" && strings.HasPrefix(path, "/v1beta/models/") {
+		req.Header.Set("X-Goog-Api-Key", secret)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
 	// The API key determines its upstream scope.
 
 	req.Header.Set("Content-Type", "application/json")

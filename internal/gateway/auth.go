@@ -240,6 +240,11 @@ func (a *App) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		auth := r.Header.Get("Authorization")
+		if auth == "" && strings.HasPrefix(r.URL.Path, "/v1beta/") {
+			if key := r.Header.Get("X-Goog-Api-Key"); key != "" {
+				auth = "Bearer " + key
+			}
+		}
 		token := strings.TrimPrefix(auth, "Bearer ")
 		// Authenticate by the stored hash, independent of historical display prefixes.
 		if token == auth || token == "" || len(token) > 256 {

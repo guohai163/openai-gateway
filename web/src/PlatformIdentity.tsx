@@ -4,6 +4,12 @@ type Platform = "openai" | "bailian" | "gemini";
 type Translate = (key: string) => string;
 const platforms: Platform[] = ["openai", "bailian"];
 
+const platformIcons: Record<Platform, string> = {
+  openai: "/openai-platform.svg",
+  bailian: "/bailian-icon.svg",
+  gemini: "/gemini-icon.svg",
+};
+
 export function PlatformIdentity({
   platform,
   t,
@@ -11,18 +17,11 @@ export function PlatformIdentity({
   platform: string;
   t: Translate;
 }) {
-  if (platform === "gemini") return <span>{t(platform)}</span>;
-  if (!platforms.includes(platform as Platform))
+  if (!Object.hasOwn(platformIcons, platform))
     return <span>{platform || "—"}</span>;
   return (
     <span className="platform-identity">
-      <img
-        src={
-          platform === "bailian" ? "/bailian-icon.svg" : "/openai-platform.svg"
-        }
-        alt=""
-        aria-hidden="true"
-      />
+      <img src={platformIcons[platform as Platform]} alt="" aria-hidden="true" />
       <span>{t(platform)}</span>
     </span>
   );
