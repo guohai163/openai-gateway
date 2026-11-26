@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.30.1 - 2026-11-26
+
+- 私有密钥页面为 Gemini 模型生成使用原生协议的 curl 示例。
+- 手动指定的上游池禁止混选 Gemini 与 OpenAI 或百炼。
+
 ## v1.30.0 - 2026-11-26
 
 - Gemini 密钥测试改用 Google 原生 generateContent 接口，支持带 models/ 前缀的目录模型 ID。
