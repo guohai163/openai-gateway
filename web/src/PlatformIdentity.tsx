@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 
-type Platform = "openai" | "bailian";
+type Platform = "openai" | "bailian" | "gemini";
 type Translate = (key: string) => string;
 const platforms: Platform[] = ["openai", "bailian"];
 
@@ -11,6 +11,7 @@ export function PlatformIdentity({
   platform: string;
   t: Translate;
 }) {
+  if (platform === "gemini") return <span>{t(platform)}</span>;
   if (!platforms.includes(platform as Platform))
     return <span>{platform || "—"}</span>;
   return (
@@ -33,6 +34,7 @@ export function PlatformSelector({
   onChange,
   name,
   disabled = false,
+  includeGemini = false,
   label,
   t,
 }: {
@@ -41,6 +43,7 @@ export function PlatformSelector({
   onChange?: (value: Platform) => void;
   name?: string;
   disabled?: boolean;
+  includeGemini?: boolean;
   label: string;
   t: Translate;
 }) {
@@ -51,7 +54,7 @@ export function PlatformSelector({
     <fieldset className="platform-selector" disabled={disabled}>
       <legend>{label}</legend>
       <div className="platform-selector-options">
-        {platforms.map((platform) => (
+        {(includeGemini ? [...platforms, "gemini" as const] : platforms).map((platform) => (
           <label className="platform-selector-option" key={platform}>
             <input
               type="radio"

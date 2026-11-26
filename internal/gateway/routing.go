@@ -29,6 +29,9 @@ const bailianBaseURL = "https://dashscope.aliyuncs.com"
 
 func (a *App) upstreamBaseURL(platform string) string {
 	base := strings.TrimRight(a.Config.UpstreamURL, "/")
+	if platform == "gemini" && base == "https://api.openai.com" {
+		return "https://generativelanguage.googleapis.com"
+	}
 	if platform == "bailian" && base == "https://api.openai.com" {
 		return bailianBaseURL
 	}
@@ -36,6 +39,9 @@ func (a *App) upstreamBaseURL(platform string) string {
 }
 
 func upstreamRequestPath(platform, path string) string {
+	if platform == "gemini" {
+		return "/v1beta/openai/" + strings.TrimPrefix(path, "/v1/")
+	}
 	if platform != "bailian" {
 		return path
 	}

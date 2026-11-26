@@ -1319,6 +1319,7 @@ function App() {
                       <PlatformSelector
                         key={modal.id || "new"}
                         name="platform"
+                        includeGemini
                         defaultValue={modal.platform || "openai"}
                         disabled={!!modal.id}
                         label={t("channel")}

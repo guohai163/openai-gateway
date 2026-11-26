@@ -368,7 +368,7 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			if platform == "" {
 				platform = "openai"
 			}
-			if platform != "openai" && platform != "bailian" {
+			if platform != "openai" && platform != "bailian" && platform != "gemini" {
 				writeError(w, 400, "unsupported_upstream_platform")
 				return
 			}

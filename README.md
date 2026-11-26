@@ -6,7 +6,7 @@
 
 ![AI Gateway project icon](web/public/openai-icon.png)
 
-最新版本：[v1.28.2](https://github.com/guohai163/openai-gateway/releases/tag/v1.28.2) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.28.2`。
+最新版本：[v1.29.0](https://github.com/guohai163/openai-gateway/releases/tag/v1.29.0) · [更新与升级说明](CHANGELOG.md)。固定版本部署可将 `.env` 中的 `GATEWAY_IMAGE` 设为 `ghcr.io/guohai163/openai-gateway:1.29.0`。
 
 Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台。客户端只接触网关私有 Key；上游可选择 OpenAI 官方或阿里云百炼。
 
@@ -31,6 +31,12 @@ Go + PostgreSQL 实现的 OpenAI 兼容私有网关，带中英文管理后台�
 “IP 不在白名单（密钥匹配）”说明请求持有正确密钥，可用于核对用户是否更换 IP，或排查密钥是否泄漏；错误密钥无法关联到具体用户。凭据指纹使用主密钥参与的 HMAC 摘要，同一凭据可关联重复尝试，不保存密钥原文、认证头、Cookie、查询参数或请求正文。缺失或超长凭据不生成指纹；来源 IP 解析失败时显示为空，不猜测地址。主密钥更换后指纹会变化。
 
 异常日志仅管理员可见，保存在现有日志表中，不计入模型调用量、Token 用量和消费，也不创建 S3 正文归档。升级时自动执行 `021_anomalous_requests.sql`；仅记录升级后发生的异常请求。
+
+## Google Gemini 上游
+
+在管理后台的「上游密钥」中新建密钥，渠道选择 **Google Gemini**，粘贴在 [Google AI Studio](https://aistudio.google.com/api-keys) 创建的 API Key。保存后网关会同步模型目录。客户端使用网关私有 Key 和同步列表中的模型 ID，可调用 Chat Completions（含流式响应）、Embeddings 和图片生成，具体能力取决于所选模型。
+
+Gemini 接入使用 [Google 的 OpenAI 兼容 API](https://ai.google.dev/gemini-api/docs/openai)。手动测试和恢复探测需选择支持文本对话的模型。在「模型定价」选择 Google Gemini 并点击「同步官方价格」，网关会拉取标准付费 Token 单价。同步采用当日生效的官方报价，官方价格切换后可重新同步。无法匹配的模型费用显示为未知。
 
 ## 上游密钥请求测试
 
@@ -258,7 +264,7 @@ Responses ID 只能由创建它的私有 Key 使用；后续轮次与资源操�
 
 - `GET /session`、`POST /logout`、`GET /dashboard`、`GET /settings`。
 - `GET /client_ip` 返回当前请求的 `client_ip` 和建议的 `default_cidr`（IPv4 `/24`、IPv6 `/64`）。新建私有 Key 时自动填入白名单，可手动修改；编辑已有 Key 保留原白名单。客户端 IP 沿用 `TRUSTED_PROXIES` 的可信代理解析，不信任任意转发头。
-- `GET, POST /upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 支持 `platform` 为 `openai`（默认）或 `bailian`，并需要填写对应渠道的 API Key。
+- `GET, POST /upstream_keys|gateway_keys`；`PATCH /{resource}/{id}` 修改名称、启停及对应权限。上游密钥明文不可修改，需要创建新资源进行轮换；新建上游 Key 支持 `platform` 为 `openai`（默认）、`bailian` 或 `gemini`，并需要填写对应渠道的 API Key。
 - `POST /upstream_keys/{id}/refresh`、`POST /upstream_keys/{id}/reset_auth`、`POST /upstream_keys/{id}/probe`。
 - `GET /upstream_keys/{id}/model_catalog` 返回最近一次成功同步的完整上游模型响应和同步时间；也可在上游密钥列表点击模型数量查看。
 - 私有 Key 使用 `models` 数组设置模型权限；管理员的 `["*"]` 表示全部当前及未来可用模型，普通用户的 `["*"]` 仅表示全部当前及未来具有有效完整定价的模型。新建必须传入整数 `expires_in_days`（30、90、120），不再接受任意 `expires_at`。编辑时省略 `expires_in_days` 保持现有到期时间，传入档位则从当前时间续期；返回的 `expires_at` 仍为服务端计算的实际到期时间。

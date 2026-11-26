@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.29.0 - 2026-11-26
+
+### Added
+
+- 支持 Google AI Studio 的 Gemini API Key，自动同步模型目录，并支持文本请求测试、流式对话、Embeddings 和图片生成。
+- 模型定价页新增 Google Gemini，可同步可识别的官方标准 Token 单价，用于估算后续请求费用。
+
+
 ## v1.28.2 - 2026-11-26
 
 ### Fixed

@@ -107,9 +107,9 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
         <div className="price-rate-stack">
           {names.map((name) => (
             <div className="price-rate-entry" key={name}>
-              <small>
+              {platform !== "gemini" && <small>
                 {t(name === "image" ? "imageTokens" : "textTokens")}
-              </small>
+              </small>}
               <strong>
                 {field === "output_price" && !modalities[name].output_applicable
                   ? t("notApplicable")
@@ -157,11 +157,11 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
       <section className="panel pricing-summary">
         <div>
           <h2>
-            {t(platform === "bailian" ? "bailianPricingScope" : "pricingScope")}
+            {t(platform === "gemini" ? "geminiPricingScope" : platform === "bailian" ? "bailianPricingScope" : "pricingScope")}
           </h2>
           <p>
             {t(
-              platform === "bailian"
+              platform === "gemini" ? "geminiPricingDescription" : platform === "bailian"
                 ? "bailianPricingDescription"
                 : "pricingDescription",
             )}
@@ -205,14 +205,14 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
         </span>
         <a
           href={
-            platform === "bailian"
+            platform === "gemini" ? "https://aistudio.google.com/docs/pricing" : platform === "bailian"
               ? "https://help.aliyun.com/zh/model-studio/model-pricing"
               : "https://developers.openai.com/api/docs/pricing"
           }
           target="_blank"
           rel="noreferrer"
         >
-          {t(platform === "bailian" ? "bailianPricingSource" : "pricingSource")}
+          {t(platform === "gemini" ? "geminiPricingSource" : platform === "bailian" ? "bailianPricingSource" : "pricingSource")}
           <ExternalLink size={13} />
         </a>
       </div>
@@ -231,6 +231,7 @@ export function ModelPricing({ api, t, locale, onUnauthorized }: Props) {
       <section className="panel data-panel">
         <div className="table-toolbar">
           <PlatformSelector
+            includeGemini
             label={t("platform")}
             value={platform}
             disabled={syncing}

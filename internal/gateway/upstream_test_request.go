@@ -57,7 +57,7 @@ func (a *App) runUpstreamTest(ctx context.Context, id, model string) (modelTestR
 	}
 	u.Model = model
 	path := "/v1/responses"
-	chat := u.Platform == "bailian"
+	chat := u.Platform == "bailian" || u.Platform == "gemini"
 	body := map[string]any{
 		"model": model, "input": []any{map[string]string{"role": "user", "content": modelTestPrompt}},
 		"store": false, "stream": true,

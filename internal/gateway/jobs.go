@@ -100,7 +100,16 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
 
 	u.Model = u.ProbeModel
 	b, _ := json.Marshal(map[string]any{"model": u.ProbeModel, "input": "Reply OK.", "max_output_tokens": 64, "store": false})
-	req, e := a.makeRequest(ctx, u, "POST", "/v1/responses", b)
+	path := "/v1/responses"
+	if u.Platform == "gemini" {
+		path = "/v1/chat/completions"
+		b, _ = json.Marshal(map[string]any{
+			"model":                 u.ProbeModel,
+			"messages":              []map[string]string{{"role": "user", "content": "Reply OK."}},
+			"max_completion_tokens": 64,
+		})
+	}
+	req, e := a.makeRequest(ctx, u, "POST", path, b)
 	if e != nil {
 		return e
 	}
@@ -119,13 +128,18 @@ func (a *App) probe(ctx context.Context, id string) (result error) {
 	_ = json.Unmarshal(raw, &v)
 	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	a.record(logCtx, GatewayKey{}, u, "POST", "/v1/responses", resp.StatusCode, code, start, usageFrom(v), "", 1, "probe")
+	a.record(logCtx, GatewayKey{}, u, "POST", path, resp.StatusCode, code, start, usageFrom(v), "", 1, "probe")
 	if resp.StatusCode != 200 {
 		a.classify(ctx, u, resp.StatusCode, code, resp.Header)
 		return errors.New("probe_failed")
 	}
 	status, _ := v["status"].(string)
-	if v["id"] == nil || (status != "completed" && status != "incomplete") {
+	valid := v["id"] != nil && (status == "completed" || status == "incomplete")
+	if u.Platform == "gemini" {
+		choices, _ := v["choices"].([]any)
+		valid = len(choices) > 0
+	}
+	if !valid {
 		return errors.New("invalid_probe_response")
 	}
 	_, e = a.DB.Exec(ctx, "UPDATE upstream_keys SET quota_blocked=false,last_error='',probe_failures=0,next_probe_at=NULL WHERE id=$1", id)

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -133,6 +134,11 @@ func (a *App) proxyRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 503, "database_unavailable")
 		return
+	}
+	switch path {
+	case "/v1/chat/completions", "/v1/embeddings", "/v1/images/generations":
+	default:
+		candidates = slices.DeleteFunc(candidates, func(u Upstream) bool { return u.Platform == "gemini" })
 	}
 	if len(candidates) == 0 {
 		writeError(w, 503, "no_available_upstream")

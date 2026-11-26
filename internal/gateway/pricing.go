@@ -660,7 +660,7 @@ func (a *App) fetchBailianPricing(ctx context.Context, source string) ([]modelPr
 }
 
 func (a *App) syncPricing(ctx context.Context, platform, source string) (count int, result error) {
-	if platform != "openai" && platform != "bailian" {
+	if platform != "openai" && platform != "bailian" && platform != "gemini" {
 		return 0, errors.New("unsupported_platform")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -700,7 +700,11 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 		if reqErr != nil || len(raw) > 4<<20 || resp.StatusCode != 200 {
 			return 0, errors.New("pricing_fetch_failed")
 		}
-		prices, e = parseOpenAIPricing(string(raw))
+		if platform == "gemini" {
+			prices, e = parseGeminiPricing(string(raw), time.Now())
+		} else {
+			prices, e = parseOpenAIPricing(string(raw))
+		}
 	}
 	if e != nil {
 		return 0, e
@@ -734,7 +738,7 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 			sourcePrices = json.RawMessage(`[]`)
 		}
 		sourceURL := openAIPricingURL
-		if platform == "bailian" {
+		if platform != "openai" {
 			sourceURL = source
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,currency,price_unit,input_price,output_price,cached_input_price,output_applicable,long_context_policy,long_context_threshold,long_input_price,long_output_price,long_cached_input_price,source_url,source_current,synced_at,cache_write_30m_price,cache_write_12h_price,long_cache_write_30m_price,long_cache_write_12h_price,modality_prices,source_prices)
@@ -767,7 +771,7 @@ func (a *App) pricingAdmin(w http.ResponseWriter, r *http.Request, parts []strin
 		return
 	}
 	if len(parts) == 2 && parts[1] == "sync" && r.Method == "POST" {
-		if platform != "openai" && platform != "bailian" {
+		if platform != "openai" && platform != "bailian" && platform != "gemini" {
 			writeError(w, 400, "unsupported_platform")
 			return
 		}
@@ -779,6 +783,8 @@ func (a *App) pricingAdmin(w http.ResponseWriter, r *http.Request, parts []strin
 		source := openAIPricingURL
 		if platform == "bailian" {
 			source = a.upstreamBaseURL("bailian") + "/api/v1/models"
+		} else if platform == "gemini" {
+			source = geminiPricingURL
 		}
 		count, e := a.syncPricing(r.Context(), platform, source)
 		a.audit(r.Context(), "sync", "model_pricing", platform)
