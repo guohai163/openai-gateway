@@ -748,8 +748,16 @@ func (a *App) syncPricing(ctx context.Context, platform, source string) (count i
 			return 0, e
 		}
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,currency) SELECT DISTINCT k.platform,m.model,CASE WHEN k.platform='bailian' THEN 'CNY' ELSE 'USD' END FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.platform=$1 ON CONFLICT DO NOTHING`, platform); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO model_pricing(platform,model,currency) SELECT DISTINCT k.platform,CASE WHEN k.platform='gemini' THEN regexp_replace(m.model, '^models/', '') ELSE m.model END,CASE WHEN k.platform='bailian' THEN 'CNY' ELSE 'USD' END FROM models m JOIN upstream_keys k ON k.id=m.upstream_key_id WHERE k.platform=$1 ON CONFLICT DO NOTHING`, platform); e != nil {
 		return 0, e
+	}
+	if platform == "gemini" {
+		if _, e = tx.Exec(ctx, `DELETE FROM model_pricing WHERE platform='gemini' AND model LIKE 'models/%'
+ AND synced_at IS NULL AND input_price IS NULL AND output_price IS NULL
+ AND EXISTS (SELECT 1 FROM model_pricing canonical WHERE canonical.platform='gemini'
+ AND canonical.model=regexp_replace(model_pricing.model, '^models/', ''))`); e != nil {
+			return 0, e
+		}
 	}
 	if _, e = tx.Exec(ctx, "UPDATE model_pricing_sync SET succeeded_at=now(),last_error='',parsed_count=$2 WHERE platform=$1", platform, len(prices)); e != nil {
 		return 0, e

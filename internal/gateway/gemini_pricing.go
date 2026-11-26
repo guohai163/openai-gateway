@@ -9,12 +9,26 @@ import (
 
 const geminiPricingURL = "https://aistudio.google.com/docs/pricing.md"
 
-var geminiPriceModel = regexp.MustCompile("\\x60(gemini-[a-z0-9.-]+)\\x60")
+var geminiPriceModel = regexp.MustCompile("\\[`(gemini-[a-z0-9.-]+)`\\]\\(/docs/models/")
 var geminiStandardTable = regexp.MustCompile(`(?s)\{% tab title="Standard" %\}\s*(\{% table %\}.*?\{% /table %\})`)
 var geminiPriceTable = regexp.MustCompile(`(?s)\{% table %\}.*?\{% /table %\}`)
 var geminiDatedRate = regexp.MustCompile(`^\s*(\$[0-9.]+) through ([A-Za-z]+ [0-9]+, [0-9]{4})\.\s*(\$[0-9.]+) starting ([A-Za-z]+ [0-9]+, [0-9]{4})\.\s*$`)
 
 func parseGeminiRate(value string, now time.Time) (*string, bool) {
+	var rates []string
+	for line := range strings.SplitSeq(value, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "(storage price)") || strings.HasPrefix(line, "Equivalent to ") {
+			continue
+		}
+		rates = append(rates, line)
+	}
+	// Use the published text rate when Google lists separate modalities.
+	if len(rates) > 1 && (strings.HasSuffix(rates[0], " (text)") || strings.HasSuffix(rates[0], " (text / image / video)")) {
+		rates = rates[:1]
+	}
+	value = strings.Join(rates, "\n")
+	value = strings.NewReplacer(" (text / image / video)", "", " (text)", "", " (audio)", "").Replace(value)
 	if parts := geminiDatedRate.FindStringSubmatch(value); parts != nil {
 		last, lastErr := time.Parse("January 2, 2006", parts[2])
 		first, firstErr := time.Parse("January 2, 2006", parts[4])
@@ -40,11 +54,14 @@ func parseGeminiPricing(markdown string, now time.Time) ([]modelPrice, error) {
 		if table == "" || !strings.Contains(table, "* Paid Tier, per 1M tokens in USD") {
 			continue
 		}
-		model := geminiPriceModel.FindStringSubmatch(section[:strings.Index(section, table)])
-		if model == nil {
+		intro := section[:strings.Index(section, table)]
+		firstModel := geminiPriceModel.FindStringIndex(intro)
+		if firstModel == nil {
 			continue
 		}
-		price := modelPrice{Model: model[1], LongPolicy: "none", OutputApplicable: model[1] != "gemini-embedding-001"}
+		modelList, _, _ := strings.Cut(intro[firstModel[0]:], "\n\n")
+		model := geminiPriceModel.FindAllStringSubmatch(modelList, -1)
+		price := modelPrice{LongPolicy: "none", OutputApplicable: model[0][1] != "gemini-embedding-001"}
 		valid := true
 		for _, row := range strings.Split(table, "\n  ---") {
 			cells := strings.Split(row, "\n  * ")
@@ -74,11 +91,14 @@ func parseGeminiPricing(markdown string, now time.Time) ([]modelPrice, error) {
 		if !valid || price.Input == nil || (price.OutputApplicable && price.Output == nil) {
 			continue
 		}
-		if seen[price.Model] {
-			return nil, errors.New("pricing_conflict")
+		for _, match := range model {
+			price.Model = match[1]
+			if seen[price.Model] {
+				return nil, errors.New("pricing_conflict")
+			}
+			seen[price.Model] = true
+			prices = append(prices, price)
 		}
-		seen[price.Model] = true
-		prices = append(prices, price)
 	}
 	if len(prices) == 0 {
 		return nil, errors.New("pricing_format_changed")
