@@ -27,6 +27,21 @@ export function PlatformIdentity({
   );
 }
 
+export function PlatformIcon({ platform, t }: { platform: string; t: Translate }) {
+  if (!Object.hasOwn(platformIcons, platform)) return null;
+  const label = t(platform);
+  return (
+    <img
+      className="routing-platform-icon"
+      src={platformIcons[platform as Platform]}
+      alt={label}
+      title={label}
+      width={16}
+      height={16}
+    />
+  );
+}
+
 export function PlatformSelector({
   value,
   defaultValue = "openai",

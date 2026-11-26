@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatDateTime } from "./date-time.mjs";
+import { PlatformIcon } from "./PlatformIdentity";
 
 type Upstream = {
   id: string;
@@ -145,7 +146,8 @@ export function KeyRoutingFields({
                       )
                     }
                   />
-                  {upstream.name}{" "}
+                  <PlatformIcon platform={upstream.platform} t={t} />
+                  {upstream.name}
                   <small>
                     {!upstream.enabled
                       ? t("disabled")

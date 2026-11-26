@@ -2407,6 +2407,7 @@ dialog.oauth-test-modal::backdrop { background: rgba(0, 0, 0, .45); }
 .routing-check { flex-direction: row; align-items: center; }
 .routing-check input { width: auto; }
 .routing-check small { margin-left: auto; }
+.routing-platform-icon { flex: none; object-fit: contain; }
 .routing-upstream-options { display: grid; gap: 12px; max-height: 240px; overflow: auto; }
 .routing-order { padding-left: 24px; margin: 0; display: grid; gap: 8px; }
 .routing-order li { display: flex; gap: 8px; align-items: center; }
