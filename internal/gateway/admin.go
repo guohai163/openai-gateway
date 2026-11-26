@@ -558,13 +558,17 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 			return
 		}
 		if in.UpstreamKeyIDs != nil && len(ids) > 0 {
-			var count int
-			if e = keyTx.QueryRow(ctx, "SELECT count(*) FROM upstream_keys WHERE id=ANY($1::text[])", ids).Scan(&count); e != nil {
+			var count, families int
+			if e = keyTx.QueryRow(ctx, "SELECT count(*),count(DISTINCT (platform='gemini')) FROM upstream_keys WHERE id=ANY($1::text[])", ids).Scan(&count, &families); e != nil {
 				adminDBError(w, e)
 				return
 			}
 			if count != len(ids) {
 				writeError(w, 400, "invalid_routing_pool")
+				return
+			}
+			if families > 1 {
+				writeError(w, 400, "mixed_upstream_protocols")
 				return
 			}
 		}

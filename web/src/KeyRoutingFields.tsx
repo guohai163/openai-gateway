@@ -4,6 +4,7 @@ import { formatDateTime } from "./date-time.mjs";
 type Upstream = {
   id: string;
   name: string;
+  platform: string;
   enabled: boolean;
   invalid: boolean;
   quota_blocked: boolean;
@@ -66,6 +67,11 @@ export function KeyRoutingFields({
       active = false;
     };
   }, [api, attempt]);
+  const selectedFamilies = new Set(
+    upstreams.filter((upstream) => ids.includes(upstream.id))
+      .map((upstream) => upstream.platform === "gemini"),
+  );
+  const mixed = !all && selectedFamilies.size > 1;
   const move = (index: number, delta: number) => {
     const next = [...ids];
     [next[index], next[index + delta]] = [next[index + delta], next[index]];
@@ -105,6 +111,7 @@ export function KeyRoutingFields({
           {t("routingAllUpstreams")}
         </label>
       )}
+      <small>{t(all ? "routingProtocolByEndpoint" : "mixed_upstream_protocols")}</small>
       <input type="hidden" name="routing_all" value={all ? "true" : "false"} />
       {loading ? (
         <p role="status">{t("loading")}</p>
@@ -128,6 +135,8 @@ export function KeyRoutingFields({
                   <input
                     type="checkbox"
                     checked={ids.includes(upstream.id)}
+                    disabled={!ids.includes(upstream.id) && selectedFamilies.size > 0 &&
+                      (mixed || !selectedFamilies.has(upstream.platform === "gemini"))}
                     onChange={(e) =>
                       setIDs(
                         e.target.checked
@@ -209,7 +218,7 @@ export function KeyRoutingFields({
       <input
         type="hidden"
         name="routing_ready"
-        value={error || loading ? "false" : "true"}
+        value={error || loading || mixed ? "false" : "true"}
       />
       <small>{t("routingSaveHint")}</small>
     </fieldset>

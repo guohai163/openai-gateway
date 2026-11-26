@@ -5,11 +5,20 @@ function shellQuote(value) {
 }
 
 export function buildCurlExample(origin, model = exampleModel, key = "") {
-  const endpoint = `${origin.replace(/\/$/, "")}/v1/responses`;
+  const id = model.trim();
+  const gemini = /^(?:models\/|gemini-)/.test(id);
+  const path = gemini
+    ? `/v1beta/models/${encodeURIComponent(id.replace(/^models\//, ""))}:generateContent`
+    : "/v1/responses";
+  const endpoint = origin.replace(/\/$/, "") + path;
+  const header = gemini ? "X-Goog-Api-Key: " : "Authorization: Bearer ";
   const authorization = key.trim()
-    ? shellQuote(`Authorization: Bearer ${key.trim()}`)
-    : '"Authorization: Bearer $GATEWAY_API_KEY"';
-  const body = JSON.stringify({ model: model.trim(), input: "hi" }, null, 2);
+    ? shellQuote(header + key.trim())
+    : `"${header}$GATEWAY_API_KEY"`;
+  const payload = gemini
+    ? { contents: [{ parts: [{ text: "hi" }] }] }
+    : { model: id, input: "hi" };
+  const body = JSON.stringify(payload, null, 2);
   return [
     `curl --request POST ${shellQuote(endpoint)} \\`,
     `  --header ${authorization} \\`,
