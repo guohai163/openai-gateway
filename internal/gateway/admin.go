@@ -372,7 +372,10 @@ func (a *App) saveResource(w http.ResponseWriter, r *http.Request, resource, id 
 				writeError(w, 400, "unsupported_upstream_platform")
 				return
 			}
-			if !strings.HasPrefix(in.Key, "sk-") || strings.HasPrefix(in.Key, "sk-admin-") {
+			if platform == "gemini" {
+				in.Key = strings.TrimSpace(in.Key)
+			}
+			if in.Key == "" || (platform != "gemini" && (!strings.HasPrefix(in.Key, "sk-") || strings.HasPrefix(in.Key, "sk-admin-"))) {
 				writeError(w, 400, "upstream_key_required")
 				return
 			}

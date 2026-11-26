@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.29.1 - 2026-11-26
+
+### Fixed
+
+- 修复新增 Google Gemini 上游时误用其他渠道的密钥前缀校验，允许保存 Google AI Studio 签发的 API Key，并去掉输入首尾的空白字符。
+
 ## v1.29.0 - 2026-11-26
 
 ### Added
